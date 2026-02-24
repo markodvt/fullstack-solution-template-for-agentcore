@@ -1,9 +1,19 @@
-stack_name_base: FAST-stack
+stack_name_base: marodon-fast
 
 # Optional: Set to automatically create an admin user and email credentials
 # If not provided, you'll need to manually create users via AWS Console
 admin_user_email: null # Example: admin@example.com
 
 backend:
-  pattern: strands-single-agent # Available patterns: strands-single-agent, langgraph-single-agent
+  # Multiple agent patterns - each gets its own runtime
+  agents:
+    - pattern: strands-colorado-agent
+      name: colorado
+    - pattern: strands-umich-agent
+      name: umich
+    - pattern: strands-coder-agent
+      name: coder
+    # Orchestrator will be added after specialists are deployed
+    # - pattern: strands-orchestrator-agent
+    #   name: orchestrator
   deployment_type: docker # Available deployment types: docker (default), zip

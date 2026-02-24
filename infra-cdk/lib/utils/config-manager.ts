@@ -6,11 +6,17 @@ const MAX_STACK_NAME_BASE_LENGTH = 35
 
 export type DeploymentType = "docker" | "zip"
 
+export interface AgentConfig {
+  pattern: string
+  name: string
+}
+
 export interface AppConfig {
   stack_name_base: string
   admin_user_email?: string | null
   backend: {
-    pattern: string
+    pattern?: string  // Legacy single agent mode
+    agents?: AgentConfig[]  // New multi-agent mode
     deployment_type: DeploymentType
   }
 }
@@ -49,11 +55,28 @@ export class ConfigManager {
         )
       }
 
+      // Support both legacy single agent and new multi-agent modes
+      const backend = parsedConfig.backend
+      if (!backend) {
+        throw new Error("backend configuration is required in config.yaml")
+      }
+
+      // Validate that either pattern or agents is provided
+      if (!backend.pattern && (!backend.agents || backend.agents.length === 0)) {
+        throw new Error("backend must have either 'pattern' (single agent) or 'agents' array (multi-agent)")
+      }
+
+      // If both are provided, prefer agents array
+      if (backend.pattern && backend.agents && backend.agents.length > 0) {
+        console.warn("Both 'pattern' and 'agents' provided in config. Using 'agents' array.")
+      }
+
       return {
         stack_name_base: stackNameBase,
         admin_user_email: parsedConfig.admin_user_email || null,
         backend: {
-          pattern: parsedConfig.backend?.pattern || "strands-single-agent",
+          pattern: backend.pattern,
+          agents: backend.agents,
           deployment_type: deploymentType,
         },
       }
