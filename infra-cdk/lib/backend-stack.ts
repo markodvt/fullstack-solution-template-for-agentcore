@@ -230,15 +230,34 @@ export class BackendStack extends cdk.NestedStack {
     // Create AgentCore execution role
     const agentRole = new AgentCoreRole(this, "AgentCoreRole")
 
-    // Create memory resource with short-term memory (conversation history) as default
-    // To enable long-term strategies (summaries, preferences, facts), see docs/MEMORY_INTEGRATION.md
+    // Create memory resource with long-term memory strategies enabled
+    // For more details, see docs/MEMORY_INTEGRATION.md
     const memory = new cdk.CfnResource(this, "AgentMemory", {
       type: "AWS::BedrockAgentCore::Memory",
       properties: {
         Name: cdk.Names.uniqueResourceName(this, { maxLength: 48 }),
         EventExpiryDuration: 30,
-        Description: `Short-term memory for ${config.stack_name_base} agent`,
-        MemoryStrategies: [], // Empty array = short-term only (conversation history)
+        Description: `Memory with long-term strategies for ${config.stack_name_base} agent`,
+        MemoryStrategies: [
+          {
+            SummaryMemoryStrategy: {
+              Name: "SessionSummarizer",
+              Namespaces: ["/summaries/{actorId}/{sessionId}"],
+            },
+          },
+          {
+            UserPreferenceMemoryStrategy: {
+              Name: "PreferenceLearner",
+              Namespaces: ["/preferences/{actorId}"],
+            },
+          },
+          {
+            SemanticMemoryStrategy: {
+              Name: "FactExtractor",
+              Namespaces: ["/facts/{actorId}"],
+            },
+          },
+        ],
         MemoryExecutionRoleArn: agentRole.roleArn,
         Tags: {
           Name: `${config.stack_name_base}_Memory`,

@@ -3,7 +3,10 @@ import os
 import traceback
 
 import boto3
-from bedrock_agentcore.memory.integrations.strands.config import AgentCoreMemoryConfig
+from bedrock_agentcore.memory.integrations.strands.config import (
+    AgentCoreMemoryConfig,
+    RetrievalConfig,
+)
 from bedrock_agentcore.memory.integrations.strands.session_manager import (
     AgentCoreMemorySessionManager,
 )
@@ -59,12 +62,31 @@ def create_basic_agent(user_id: str, session_id: str) -> Agent:
     Create a basic agent with Gateway MCP tools and memory integration.
 
     This function sets up an agent that can access tools through the AgentCore Gateway
-    and maintains conversation memory. It handles authentication, creates the MCP client
-    connection, and configures the agent with access to all tools available through
-    the Gateway. If Gateway connection fails, it falls back to an agent without tools.
+    and maintains both short-term and long-term conversation memory. It handles 
+    authentication, creates the MCP client connection, and configures the agent with 
+    access to all tools available through the Gateway. Long-term memory strategies 
+    (preferences, facts, summaries) are automatically retrieved and provided to the 
+    agent for context. If Gateway connection fails, it falls back to an agent without tools.
+
+    Args:
+        user_id: The unique identifier for the user (actor_id in memory)
+        session_id: The unique identifier for this conversation session
+
+    Returns:
+        Agent: Configured Strands agent with tools and memory
     """
     system_prompt = """You are a helpful assistant with access to tools via the Gateway and Code Interpreter.
-    When asked about your tools, list them and explain what they do."""
+
+You have access to:
+- Short-term memory: Recent conversation history within this session
+- Long-term memory: User preferences, important facts, and session summaries across all conversations
+
+When responding:
+- Reference relevant information from past conversations when appropriate
+- Learn and remember user preferences
+- Build on previous context to provide personalized assistance
+
+When asked about your tools, list them and explain what they do."""
 
     bedrock_model = BedrockModel(
         model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0", temperature=0.1
@@ -74,9 +96,23 @@ def create_basic_agent(user_id: str, session_id: str) -> Agent:
     if not memory_id:
         raise ValueError("MEMORY_ID environment variable is required")
 
-    # Configure AgentCore Memory
+    # Configure AgentCore Memory with long-term memory retrieval
+    # Retrieves relevant preferences, facts, and summaries before each agent invocation
+    # top_k: Number of records to retrieve from each namespace
+    # relevance_score: Minimum similarity threshold (0.0-1.0) for retrieval
     agentcore_memory_config = AgentCoreMemoryConfig(
-        memory_id=memory_id, session_id=session_id, actor_id=user_id
+        memory_id=memory_id,
+        session_id=session_id,
+        actor_id=user_id,
+        retrieval_config={
+            "/preferences/{actorId}": RetrievalConfig(
+                top_k=5, relevance_score=0.7
+            ),
+            "/facts/{actorId}": RetrievalConfig(top_k=10, relevance_score=0.3),
+            "/summaries/{actorId}/{sessionId}": RetrievalConfig(
+                top_k=3, relevance_score=0.5
+            ),
+        },
     )
 
     session_manager = AgentCoreMemorySessionManager(
