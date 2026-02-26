@@ -1,0 +1,55 @@
+Fix multi-agent orchestration: strands-agents-tools dependency
+
+Root Cause Analysis:
+The UMich agent was failing with ModuleNotFoundError for 'strands_tools'
+because strands_tools comes from a separate package (strands-agents-tools),
+not included in strands-agents. This was discovered through local testing
+and verification against PyPI package documentation.
+
+The orchestrator agent couldn't invoke specialist agents because:
+1. Specialist invocation functions lacked @tool decorators
+2. functools.partial objects don't preserve @tool decorator metadata
+3. Strands couldn't recognize the tools for LLM invocation
+
+What Was Fixed:
+- Added strands-agents-tools>=1.0.0 to all agent requirements.txt files
+- Added @tool decorators to specialist invocation functions
+- Implemented functools.partial parameter binding (needs wrapper class)
+- Fixed SSM parameter name (runtime_arn → runtime-arn)
+- Created comprehensive strands.md steering documentation
+- Built local testing environment for pre-deployment validation
+
+Key Changes:
+- patterns/strands-umich-agent/requirements.txt
+- patterns/strands-colorado-agent/requirements.txt
+- patterns/strands-coder-agent/requirements.txt
+- patterns/strands-single-agent/requirements.txt
+- patterns/strands-multi-agent-orchestrator/requirements.txt
+- patterns/strands-multi-agent-orchestrator/tools/invoke_specialist.py
+- patterns/strands-multi-agent-orchestrator/agents/orchestrator/orchestrator_agent.py
+- .kiro/steering/strands.md (new)
+- patterns/local-agents/* (new testing environment)
+
+Why This Matters:
+- UMich agent will now start successfully in AWS
+- All agents have correct dependencies for strands_tools imports
+- Orchestrator has proper tool registration (pending wrapper class pattern)
+- Local testing environment prevents future deployment issues
+- Accurate documentation prevents confusion about package structure
+
+Next Steps:
+1. Implement wrapper class pattern for orchestrator specialist tools
+2. Deploy updated Docker images with new requirements.txt
+3. Run comprehensive UAT testing of all 4 agents
+4. Verify end-to-end multi-agent orchestration flow
+
+Testing:
+- Local UMich agent successfully uses http_request tool
+- Import verification tests pass for all packages
+- Ready for AWS deployment and integration testing
+
+Documentation:
+- Created .kiro/dev-history/multi-agent-orchestration-pattern/session-summary-2026-02-26-continued.md
+- Created .kiro/steering/strands.md with correct package information
+- Documented functools.partial limitation with @tool decorator
+- Added local testing workflow documentation

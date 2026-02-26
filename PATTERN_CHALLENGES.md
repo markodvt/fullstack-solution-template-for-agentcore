@@ -54,3 +54,5 @@ But the current repo revisions (not yet deployed) move into an alternative appro
 2. Not every pattern will make sense with a single UI. But perhaps for the time being we can leave the UI as a static part of the repo, and keep the backend `pattern` as the only variable in the infra-cdk/config.yaml?
 
 3. Same quesiton for the other elements.
+
+4. We are collecting a lot of ALL CAPS planning docs (.md) and need to pivot to Spec Driven with a .kiro/ folder; and clean up those docs. Use them for reference to build the spec.

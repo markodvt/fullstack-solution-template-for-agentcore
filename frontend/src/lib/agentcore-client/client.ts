@@ -8,6 +8,7 @@ import { readSSEStream } from "./utils/sse";
 
 const PARSERS: Record<AgentPattern, ChunkParser> = {
   "strands-single-agent": parseStrandsChunk,
+  "strands-multi-agent-orchestrator": parseStrandsChunk,
   "langgraph-single-agent": parseLanggraphChunk,
 };
 

@@ -17,7 +17,6 @@ build/
 __pycache__
 *.code-workspace
 .ruff_cache
-.kiro
 rvl_cdip_*
 notebooks/examples/data
 .idea/

@@ -1,0 +1,32 @@
+{
+  "agents": [
+    {
+      "name": "orchestrator",
+      "displayName": "Orchestrator",
+      "description": "Main agent that routes queries to specialized agents",
+      "runtimeId": "orchestrator",
+      "isDefault": true
+    },
+    {
+      "name": "colorado",
+      "displayName": "Colorado Specialist",
+      "description": "Specialized agent for Colorado-specific queries",
+      "runtimeId": "colorado",
+      "isDefault": false
+    },
+    {
+      "name": "umich",
+      "displayName": "UMich Specialist",
+      "description": "Specialized agent for University of Michigan queries",
+      "runtimeId": "umich",
+      "isDefault": false
+    },
+    {
+      "name": "coder",
+      "displayName": "Coding Assistant",
+      "description": "Specialized agent for coding and technical assistance",
+      "runtimeId": "coder",
+      "isDefault": false
+    }
+  ]
+}

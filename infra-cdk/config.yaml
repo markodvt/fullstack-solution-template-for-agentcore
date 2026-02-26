@@ -5,15 +5,5 @@ stack_name_base: marodon-fast
 admin_user_email: null # Example: admin@example.com
 
 backend:
-  # Multiple agent patterns - each gets its own runtime
-  agents:
-    - pattern: strands-colorado-agent
-      name: colorado
-    - pattern: strands-umich-agent
-      name: umich
-    - pattern: strands-coder-agent
-      name: coder
-    # Orchestrator will be added after specialists are deployed
-    # - pattern: strands-orchestrator-agent
-    #   name: orchestrator
+  pattern: strands-multi-agent-orchestrator
   deployment_type: docker # Available deployment types: docker (default), zip

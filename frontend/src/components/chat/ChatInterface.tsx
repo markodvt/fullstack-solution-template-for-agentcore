@@ -13,13 +13,32 @@ import { submitFeedback } from "@/services/feedbackService"
 import { useAuth } from "react-oidc-context"
 import { useDefaultTool } from "@/hooks/useToolRenderer"
 import { ToolCallDisplay } from "./ToolCallDisplay"
+import { discoverAgents, getDefaultAgent, type Agent } from "@/services/agentDiscoveryService"
 
+/**
+ * Main chat interface component with multi-agent support.
+ * 
+ * This component manages:
+ * - Agent discovery and selection
+ * - Separate conversation histories per agent
+ * - Session management per agent
+ * - AgentCore client initialization and updates
+ */
 export default function ChatInterface() {
+  // Agent management state
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
+  const [agentDiscoveryError, setAgentDiscoveryError] = useState<string | null>(null)
+
+  // Conversation state per agent
+  const [conversationHistories, setConversationHistories] = useState<Map<string, Message[]>>(new Map())
+  const [sessionIds, setSessionIds] = useState<Map<string, string>>(new Map())
+
+  // Current conversation state
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [client, setClient] = useState<AgentCoreClient | null>(null)
-  const [sessionId] = useState(() => crypto.randomUUID())
 
   const { isLoading, setIsLoading } = useGlobal()
   const auth = useAuth()
@@ -32,43 +51,191 @@ export default function ChatInterface() {
     <ToolCallDisplay name={name} args={args} status={status} result={result} />
   ))
 
-  // Load agent configuration and create client on mount
-  useEffect(() => {
-    async function loadConfig() {
+  /**
+   * Get or create a session ID for the specified agent.
+   * Session IDs are persisted in localStorage and the sessionIds state map.
+   * 
+   * @param agentName - Name of the agent
+   * @returns Session ID for the agent
+   */
+  const getSessionIdForAgent = (agentName: string): string => {
+    // Check if we already have a session ID for this agent
+    if (sessionIds.has(agentName)) {
+      return sessionIds.get(agentName)!
+    }
+
+    // Try to load from localStorage
+    const storedSessionIds = localStorage.getItem('agentSessionIds')
+    if (storedSessionIds) {
       try {
-        const response = await fetch("/aws-exports.json")
-        if (!response.ok) {
-          throw new Error("Failed to load configuration")
+        const parsed = JSON.parse(storedSessionIds)
+        if (parsed[agentName]) {
+          sessionIds.set(agentName, parsed[agentName])
+          return parsed[agentName]
         }
-        const config = await response.json()
-
-        if (!config.agentRuntimeArn) {
-          throw new Error("Agent Runtime ARN not found in configuration")
-        }
-
-        const agentClient = new AgentCoreClient({
-          runtimeArn: config.agentRuntimeArn,
-          region: config.awsRegion || "us-east-1",
-          pattern: (config.agentPattern || "strands-single-agent") as AgentPattern,
-        })
-
-        setClient(agentClient)
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error"
-        setError(`Configuration error: ${errorMessage}`)
-        console.error("Failed to load agent configuration:", err)
+        console.error('Failed to parse stored session IDs:', err)
       }
     }
 
-    loadConfig()
-  }, [])
+    // Generate new session ID
+    const newSessionId = crypto.randomUUID()
+    sessionIds.set(agentName, newSessionId)
+
+    // Persist to localStorage
+    const allSessionIds: Record<string, string> = {}
+    sessionIds.forEach((id, name) => {
+      allSessionIds[name] = id
+    })
+    localStorage.setItem('agentSessionIds', JSON.stringify(allSessionIds))
+
+    return newSessionId
+  }
+
+  /**
+   * Initialize AgentCore client for the selected agent.
+   * 
+   * @param agent - Agent to initialize client for
+   */
+  const initializeClientForAgent = async (agent: Agent) => {
+    try {
+      // Load configuration for pattern and region
+      const response = await fetch("/aws-exports.json")
+      if (!response.ok) {
+        throw new Error("Failed to load configuration")
+      }
+      const config = await response.json()
+
+      // Create client with selected agent's runtime ARN
+      const agentClient = new AgentCoreClient({
+        runtimeArn: agent.runtimeArn,
+        region: config.awsRegion || "us-east-1",
+        pattern: agent.pattern as AgentPattern,
+      })
+
+      setClient(agentClient)
+      setError(null)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error"
+      setError(`Failed to initialize agent client: ${errorMessage}`)
+      console.error("Failed to initialize agent client:", err)
+    }
+  }
+
+  /**
+   * Handle agent selection change.
+   * Saves current conversation, loads new agent's conversation, and updates client.
+   * 
+   * @param agent - Newly selected agent
+   */
+  const handleAgentChange = async (agent: Agent) => {
+    if (!agent || agent.name === selectedAgent?.name) {
+      return
+    }
+
+    // Save current conversation to history map
+    if (selectedAgent) {
+      conversationHistories.set(selectedAgent.name, [...messages])
+      setConversationHistories(new Map(conversationHistories))
+    }
+
+    // Load conversation history for new agent
+    const agentHistory = conversationHistories.get(agent.name) || []
+    setMessages(agentHistory)
+
+    // Update selected agent
+    setSelectedAgent(agent)
+    localStorage.setItem('selectedAgentName', agent.name)
+
+    // Initialize client for new agent
+    await initializeClientForAgent(agent)
+
+    // Clear any errors
+    setError(null)
+  }
+
+  // Discover agents and initialize on mount
+  useEffect(() => {
+    async function discoverAndInitialize() {
+      try {
+        // Wait for authentication
+        if (!auth.isAuthenticated || !auth.user?.id_token) {
+          return
+        }
+
+        // Discover available agents
+        const discoveryResult = await discoverAgents(auth.user.id_token)
+
+        if (discoveryResult.agents.length === 0) {
+          setAgentDiscoveryError('No agents available. Please contact your administrator.')
+          return
+        }
+
+        setAgents(discoveryResult.agents)
+
+        // Load selected agent from localStorage or use default
+        const storedAgentName = localStorage.getItem('selectedAgentName')
+        let agentToSelect: Agent | null = null
+
+        if (storedAgentName) {
+          agentToSelect = discoveryResult.agents.find(a => a.name === storedAgentName) || null
+        }
+
+        if (!agentToSelect) {
+          agentToSelect = getDefaultAgent(discoveryResult.agents)
+        }
+
+        if (agentToSelect) {
+          setSelectedAgent(agentToSelect)
+          await initializeClientForAgent(agentToSelect)
+        }
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Unknown error"
+        setAgentDiscoveryError(`Failed to discover agents: ${errorMessage}`)
+        console.error("Failed to discover agents:", err)
+
+        // Fall back to single-agent mode using aws-exports.json
+        try {
+          const response = await fetch("/aws-exports.json")
+          if (!response.ok) {
+            throw new Error("Failed to load configuration")
+          }
+          const config = await response.json()
+
+          if (config.agentRuntimeArn) {
+            const fallbackAgent: Agent = {
+              name: 'default',
+              displayName: 'Default Agent',
+              description: 'Fallback agent from configuration',
+              runtimeArn: config.agentRuntimeArn,
+              runtimeId: 'default',
+              isDefault: true,
+              status: 'success',
+            }
+
+            setAgents([fallbackAgent])
+            setSelectedAgent(fallbackAgent)
+            await initializeClientForAgent(fallbackAgent)
+            setAgentDiscoveryError(null)
+          }
+        } catch (fallbackErr) {
+          console.error("Fallback to single-agent mode failed:", fallbackErr)
+        }
+      }
+    }
+
+    discoverAndInitialize()
+  }, [auth.isAuthenticated, auth.user?.access_token])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
   const sendMessage = async (userMessage: string) => {
-    if (!userMessage.trim() || !client) return
+    if (!userMessage.trim() || !client || !selectedAgent) return
+
+    // Get session ID for current agent
+    const sessionId = getSessionIdForAgent(selectedAgent.name)
 
     // Clear any previous errors
     setError(null)
@@ -224,6 +391,8 @@ export default function ChatInterface() {
     feedbackType: "positive" | "negative",
     comment: string
   ) => {
+    if (!selectedAgent) return
+
     try {
       // Use ID token for API Gateway Cognito authorizer (not access token)
       const idToken = auth.user?.id_token
@@ -231,6 +400,9 @@ export default function ChatInterface() {
       if (!idToken) {
         throw new Error("Authentication required. Please log in again.")
       }
+
+      // Get session ID for current agent
+      const sessionId = getSessionIdForAgent(selectedAgent.name)
 
       await submitFeedback(
         {
@@ -250,13 +422,30 @@ export default function ChatInterface() {
     }
   }
 
-  // Start a new chat (generates new session ID)
+  // Start a new chat (clears current agent's conversation history)
   const startNewChat = () => {
+    if (!selectedAgent) return
+
+    // Clear current messages
     setMessages([])
     setInput("")
     setError(null)
-    // Note: sessionId stays the same for the component lifecycle
-    // If you want a new session ID, you'd need to remount the component
+
+    // Remove from conversation histories
+    conversationHistories.delete(selectedAgent.name)
+    setConversationHistories(new Map(conversationHistories))
+
+    // Generate new session ID for this agent
+    const newSessionId = crypto.randomUUID()
+    sessionIds.set(selectedAgent.name, newSessionId)
+    setSessionIds(new Map(sessionIds))
+
+    // Update localStorage
+    const allSessionIds: Record<string, string> = {}
+    sessionIds.forEach((id, name) => {
+      allSessionIds[name] = id
+    })
+    localStorage.setItem('agentSessionIds', JSON.stringify(allSessionIds))
   }
 
   // Check if this is the initial state (no messages)
@@ -269,10 +458,22 @@ export default function ChatInterface() {
     <div className="flex flex-col h-screen w-full">
       {/* Fixed header */}
       <div className="flex-none">
-        <ChatHeader onNewChat={startNewChat} canStartNewChat={hasAssistantMessages} />
+        <ChatHeader
+          onNewChat={startNewChat}
+          canStartNewChat={hasAssistantMessages}
+          agents={agents}
+          selectedAgent={selectedAgent}
+          onAgentChange={handleAgentChange}
+          agentSelectorDisabled={isLoading}
+        />
         {error && (
           <div className="bg-red-50 border-l-4 border-red-500 p-4 mx-4 mt-2">
             <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
+        {agentDiscoveryError && (
+          <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mx-4 mt-2">
+            <p className="text-sm text-yellow-700">{agentDiscoveryError}</p>
           </div>
         )}
       </div>
@@ -312,7 +513,7 @@ export default function ChatInterface() {
               <ChatMessages
                 messages={messages}
                 messagesEndRef={messagesEndRef}
-                sessionId={sessionId}
+                sessionId={selectedAgent ? getSessionIdForAgent(selectedAgent.name) : ''}
                 onFeedbackSubmit={handleFeedbackSubmit}
               />
             </div>

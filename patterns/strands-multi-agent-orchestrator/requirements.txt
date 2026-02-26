@@ -1,0 +1,14 @@
+# Shared dependencies for Multi-Agent Orchestration Pattern
+# All agents (orchestrator, colorado, umich, coder) use these dependencies
+
+# Core Strands agent dependencies with pinned versions
+strands-agents==1.24.0
+strands-agents-tools>=0.2.0
+mcp==1.26.0
+bedrock-agentcore[strands-agents]==1.2.0
+
+# Authentication and security
+PyJWT[crypto]>=2.10.1
+
+# AWS SDK for accessing AWS services (SSM, Cognito, AgentCore)
+boto3>=1.35.0

@@ -16,6 +16,7 @@ import * as cr from "aws-cdk-lib/custom-resources"
 import { Construct } from "constructs"
 import { AppConfig } from "./utils/config-manager"
 import { AgentCoreRole } from "./utils/agentcore-role"
+import { loadAgentManifest, AgentManifestEntry } from "./utils/agent-manifest"
 import * as path from "path"
 import * as fs from "fs"
 
@@ -39,6 +40,7 @@ export class BackendStack extends cdk.NestedStack {
   private userPool: cognito.IUserPool
   private machineClient: cognito.UserPoolClient
   private agentRuntime: agentcore.Runtime
+  private api: apigateway.RestApi
 
   constructor(scope: Construct, id: string, props: BackendStackProps) {
     super(scope, id, props)
@@ -92,11 +94,48 @@ export class BackendStack extends cdk.NestedStack {
     // Create API Gateway Feedback API resources (example of best-practice API Gateway + Lambda
     // pattern)
     this.createFeedbackApi(props.config, props.frontendUrl, feedbackTable)
+
+    // Create Agent Discovery API endpoint on the existing API Gateway
+    this.createAgentDiscoveryApi(props.config, props.frontendUrl)
   }
 
+  /**
+   * Creates AgentCore Runtime(s) based on pattern type.
+   * Detects multi-agent patterns by checking for agents.json manifest.
+   * Routes to appropriate deployment method based on pattern type.
+   * 
+   * @param config - Application configuration
+   */
   private createAgentCoreRuntime(config: AppConfig): void {
     const pattern = config.backend?.pattern || "strands-single-agent"
 
+    // Detect if this is a multi-agent pattern by checking for agents.json
+    const patternPath = path.resolve(__dirname, "..", "..", "patterns", pattern)
+    const manifestPath = path.join(patternPath, "agents.json")
+    const isMultiAgentPattern = fs.existsSync(manifestPath)
+
+    if (isMultiAgentPattern) {
+      // Multi-agent deployment: read manifest and create multiple runtimes
+      this.createMultiAgentRuntimes(config, pattern, patternPath)
+    } else {
+      // Single-agent deployment: existing logic
+      this.createSingleAgentRuntime(config, pattern, patternPath)
+    }
+  }
+
+  /**
+   * Creates a single AgentCore Runtime for traditional single-agent patterns.
+   * This method contains the original runtime creation logic for backward compatibility.
+   * 
+   * @param config - Application configuration
+   * @param pattern - Pattern name (e.g., "strands-single-agent")
+   * @param patternPath - Absolute path to pattern directory
+   */
+  private createSingleAgentRuntime(
+    config: AppConfig,
+    pattern: string,
+    patternPath: string
+  ): void {
     // Parameters
     this.agentName = new cdk.CfnParameter(this, "AgentName", {
       type: "String",
@@ -509,12 +548,12 @@ export class BackendStack extends cdk.NestedStack {
      * API Gateway defaultCorsPreflightOptions below only handles OPTIONS preflight requests.
      * See detailed explanation and fix options in: infra-cdk/lambdas/feedback/index.py
      */
-    const api = new apigateway.RestApi(this, "FeedbackApi", {
+    this.api = new apigateway.RestApi(this, "FeedbackApi", {
       restApiName: `${config.stack_name_base}-api`,
       description: "API for user feedback and future endpoints",
       defaultCorsPreflightOptions: {
         allowOrigins: [frontendUrl, "http://localhost:3000"],
-        allowMethods: ["POST", "OPTIONS"],
+        allowMethods: ["POST", "GET", "OPTIONS"],
         allowHeaders: ["Content-Type", "Authorization"],
       },
       deployOptions: {
@@ -542,7 +581,7 @@ export class BackendStack extends cdk.NestedStack {
 
     // Add request validator for API security
     const requestValidator = new apigateway.RequestValidator(this, "FeedbackApiRequestValidator", {
-      restApi: api,
+      restApi: this.api,
       requestValidatorName: `${config.stack_name_base}-request-validator`,
       validateRequestBody: true,
       validateRequestParameters: true,
@@ -556,7 +595,7 @@ export class BackendStack extends cdk.NestedStack {
     })
 
     // Create /feedback resource and POST method
-    const feedbackResource = api.root.addResource("feedback")
+    const feedbackResource = this.api.root.addResource("feedback")
     feedbackResource.addMethod("POST", new apigateway.LambdaIntegration(feedbackLambda), {
       authorizer,
       authorizationType: apigateway.AuthorizationType.COGNITO,
@@ -564,13 +603,106 @@ export class BackendStack extends cdk.NestedStack {
     })
 
     // Store the API URL for access from main stack
-    this.feedbackApiUrl = api.url
+    this.feedbackApiUrl = this.api.url
 
     // Store API URL in SSM for frontend
     new ssm.StringParameter(this, "FeedbackApiUrlParam", {
       parameterName: `/${config.stack_name_base}/feedback-api-url`,
-      stringValue: api.url,
+      stringValue: this.api.url,
       description: "Feedback API Gateway URL",
+    })
+  }
+
+  /**
+   * Creates the Agent Discovery API endpoint on the existing API Gateway.
+   * This endpoint allows the frontend to discover available agents by querying
+   * SSM Parameter Store for agent metadata.
+   * 
+   * @param config - Application configuration containing stack name
+   * @param frontendUrl - Frontend URL for CORS configuration
+   * 
+   * Implementation: infra-cdk/lambdas/agent-discovery/index.py
+   */
+  private createAgentDiscoveryApi(
+    config: AppConfig,
+    frontendUrl: string
+  ): void {
+    // Create Lambda function for agent discovery using Python
+    const agentDiscoveryLambda = new PythonFunction(this, "AgentDiscoveryLambda", {
+      functionName: `${config.stack_name_base}-agent-discovery`,
+      runtime: lambda.Runtime.PYTHON_3_13,
+      entry: path.join(__dirname, "..", "lambdas", "agent-discovery"),
+      handler: "handler",
+      environment: {
+        STACK_NAME_BASE: config.stack_name_base,
+        CORS_ALLOWED_ORIGINS: `${frontendUrl},http://localhost:3000`,
+      },
+      timeout: cdk.Duration.seconds(30),
+      layers: [
+        lambda.LayerVersion.fromLayerVersionArn(
+          this,
+          "AgentDiscoveryPowertoolsLayer",
+          `arn:aws:lambda:${
+            cdk.Stack.of(this).region
+          }:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313-arm64:18`
+        ),
+      ],
+      logGroup: new logs.LogGroup(this, "AgentDiscoveryLambdaLogGroup", {
+        logGroupName: `/aws/lambda/${config.stack_name_base}-agent-discovery`,
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    })
+
+    // Grant Lambda permissions to read SSM parameters for agent metadata
+    agentDiscoveryLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+        ],
+        resources: [
+          // Allow access to the agents path itself
+          `arn:aws:ssm:${cdk.Stack.of(this).region}:${
+            cdk.Stack.of(this).account
+          }:parameter/${config.stack_name_base}/agents`,
+          // Allow access to all parameters under the agents path
+          `arn:aws:ssm:${cdk.Stack.of(this).region}:${
+            cdk.Stack.of(this).account
+          }:parameter/${config.stack_name_base}/agents/*`,
+        ],
+      })
+    )
+
+    // Create Cognito authorizer (reuse from feedback API)
+    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(
+      this,
+      "AgentDiscoveryApiAuthorizer",
+      {
+        cognitoUserPools: [this.userPool],
+        identitySource: "method.request.header.Authorization",
+        authorizerName: `${config.stack_name_base}-agent-discovery-authorizer`,
+      }
+    )
+
+    // Add /agents resource and GET method to existing API
+    const agentsResource = this.api.root.addResource("agents")
+    agentsResource.addMethod(
+      "GET",
+      new apigateway.LambdaIntegration(agentDiscoveryLambda),
+      {
+        authorizer,
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+      }
+    )
+
+    // Store agent discovery API URL in SSM for frontend
+    new ssm.StringParameter(this, "AgentDiscoveryApiUrlParam", {
+      parameterName: `/${config.stack_name_base}/agent-discovery-api-url`,
+      stringValue: `${this.api.url}agents`,
+      description: "Agent Discovery API endpoint URL",
     })
   }
 
@@ -837,4 +969,485 @@ export class BackendStack extends cdk.NestedStack {
     const crypto = require("crypto")
     return crypto.createHash("sha256").update(content).digest("hex").slice(0, 16)
   }
+
+  /**
+   * Creates multiple AgentCore Runtimes for multi-agent orchestration patterns.
+   * Reads agents.json manifest and deploys a separate runtime for each agent.
+   * Implements graceful degradation - continues deployment even if individual agents fail.
+   * 
+   * @param config - Application configuration
+   * @param pattern - Pattern name (e.g., "strands-multi-agent-orchestrator")
+   * @param patternPath - Absolute path to pattern directory
+   */
+  private createMultiAgentRuntimes(
+    config: AppConfig,
+    pattern: string,
+    patternPath: string
+  ): void {
+    const stack = cdk.Stack.of(this)
+    const deploymentType = config.backend.deployment_type
+
+    // Load and validate agent manifest
+    const manifest = loadAgentManifest(patternPath)
+
+    // Create shared resources ONCE (outside agent loop)
+    const sharedResources = this.createSharedAgentResources(config)
+
+    // Store runtime ARNs for cross-agent invocation
+    const runtimeArns: { [agentName: string]: string } = {}
+    const deploymentStatuses: { [agentName: string]: "success" | "failed" } = {}
+
+    // Create runtime for each agent with error handling
+    for (const agentEntry of manifest.agents) {
+      const agentName = agentEntry.name
+
+      try {
+        // Validate agent directory and Dockerfile exist
+        const agentDir = path.join(patternPath, "agents", agentName)
+        const dockerfilePath = path.join(agentDir, "Dockerfile")
+
+        if (!fs.existsSync(agentDir)) {
+          throw new Error(
+            `Agent directory not found: ${agentDir}. ` +
+              `Manifest references agent "${agentName}" but directory does not exist.`
+          )
+        }
+
+        if (deploymentType === "docker" && !fs.existsSync(dockerfilePath)) {
+          throw new Error(
+            `Dockerfile not found: ${dockerfilePath}. ` +
+              `Agent "${agentName}" must have a Dockerfile for Docker deployment.`
+          )
+        }
+
+        // Create agent-specific runtime
+        const runtime = this.createAgentRuntime(
+          config,
+          pattern,
+          agentEntry,
+          sharedResources,
+          deploymentType
+        )
+
+        // Store runtime ARN
+        runtimeArns[agentName] = runtime.agentRuntimeArn
+        deploymentStatuses[agentName] = "success"
+
+        // Store agent metadata in SSM
+        this.storeAgentMetadata(config, pattern, agentEntry, runtime, "success")
+
+        // Create CloudFormation outputs
+        this.createAgentOutputs(config, agentEntry, runtime, "success")
+
+        console.log(`✅ Successfully deployed agent: ${agentName}`)
+      } catch (error: any) {
+        // Log error but continue with other agents (graceful degradation)
+        console.error(`❌ Failed to deploy agent ${agentName}:`, error)
+        deploymentStatuses[agentName] = "failed"
+
+        // Store failure status in SSM
+        this.storeAgentFailureMetadata(config, agentEntry, error.message)
+
+        // Create failure output
+        this.createAgentFailureOutputs(config, agentEntry, error.message)
+
+        // Add warning annotation to CloudFormation
+        cdk.Annotations.of(this).addWarning(
+          `Agent ${agentName} failed to deploy: ${error.message}`
+        )
+      }
+    }
+
+    // Check if at least one agent deployed successfully
+    const successfulAgents = Object.entries(deploymentStatuses).filter(
+      ([_, status]) => status === "success"
+    )
+
+    if (successfulAgents.length === 0) {
+      throw new Error(
+        "All agents failed to deploy. At least one agent must deploy successfully."
+      )
+    }
+
+    // Store the default runtime ARN (or first successful agent)
+    const defaultAgent =
+      manifest.agents.find((a) => a.isDefault && deploymentStatuses[a.name] === "success") ||
+      manifest.agents.find((a) => deploymentStatuses[a.name] === "success")!
+
+    this.runtimeArn = runtimeArns[defaultAgent.name]
+
+    // Create summary output
+    new cdk.CfnOutput(this, "DeploymentSummary", {
+      description: "Multi-agent deployment summary",
+      value: JSON.stringify({
+        total: manifest.agents.length,
+        successful: successfulAgents.length,
+        failed: manifest.agents.length - successfulAgents.length,
+        agents: deploymentStatuses,
+      }),
+    })
+  }
+
+  /**
+   * Creates shared backend resources used by all agents.
+   * These resources are created once and shared across all agent runtimes.
+   * 
+   * @param config - Application configuration
+   * @returns Shared resources object containing memory, role, and related ARNs
+   */
+  private createSharedAgentResources(config: AppConfig): SharedAgentResources {
+    // Create AgentCore execution role
+    const agentRole = new AgentCoreRole(this, "AgentCoreRole")
+
+    // Create memory resource with long-term memory strategies
+    const memory = new cdk.CfnResource(this, "AgentMemory", {
+      type: "AWS::BedrockAgentCore::Memory",
+      properties: {
+        Name: cdk.Names.uniqueResourceName(this, { maxLength: 48 }),
+        EventExpiryDuration: 30,
+        Description: `Memory with long-term strategies for ${config.stack_name_base}`,
+        MemoryStrategies: [
+          {
+            SummaryMemoryStrategy: {
+              Name: "SessionSummarizer",
+              Namespaces: ["/summaries/{actorId}/{sessionId}"],
+            },
+          },
+          {
+            UserPreferenceMemoryStrategy: {
+              Name: "PreferenceLearner",
+              Namespaces: ["/preferences/{actorId}"],
+            },
+          },
+          {
+            SemanticMemoryStrategy: {
+              Name: "FactExtractor",
+              Namespaces: ["/facts/{actorId}"],
+            },
+          },
+        ],
+        MemoryExecutionRoleArn: agentRole.roleArn,
+        Tags: {
+          Name: `${config.stack_name_base}_Memory`,
+          ManagedBy: "CDK",
+        },
+      },
+    })
+
+    const memoryId = memory.getAtt("MemoryId").toString()
+    const memoryArn = memory.getAtt("MemoryArn").toString()
+
+    // Store the memory ARN for access from main stack
+    this.memoryArn = memoryArn
+
+    // Add memory-specific permissions to agent role
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "MemoryResourceAccess",
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "bedrock-agentcore:CreateEvent",
+          "bedrock-agentcore:GetEvent",
+          "bedrock-agentcore:ListEvents",
+          "bedrock-agentcore:RetrieveMemoryRecords",
+        ],
+        resources: [memoryArn],
+      })
+    )
+
+    // Add SSM permissions for Gateway URL lookup
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "SSMParameterAccess",
+        effect: iam.Effect.ALLOW,
+        actions: ["ssm:GetParameter", "ssm:GetParameters"],
+        resources: [
+          `arn:aws:ssm:${this.region}:${this.account}:parameter/${config.stack_name_base}/*`,
+        ],
+      })
+    )
+
+    // Add Code Interpreter permissions
+    agentRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "CodeInterpreterAccess",
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "bedrock-agentcore:StartCodeInterpreterSession",
+          "bedrock-agentcore:StopCodeInterpreterSession",
+          "bedrock-agentcore:InvokeCodeInterpreter",
+        ],
+        resources: [`arn:aws:bedrock-agentcore:${this.region}:aws:code-interpreter/*`],
+      })
+    )
+
+    // Output memory ARN
+    new cdk.CfnOutput(this, "MemoryArn", {
+      description: "ARN of the shared agent memory resource",
+      value: memoryArn,
+    })
+
+    return {
+      memory,
+      memoryId,
+      memoryArn,
+      agentRole,
+    }
+  }
+
+  /**
+   * Creates a single AgentCore Runtime for one agent in a multi-agent pattern.
+   * 
+   * @param config - Application configuration
+   * @param pattern - Pattern name
+   * @param agentEntry - Agent metadata from manifest
+   * @param sharedResources - Shared resources (memory, role)
+   * @param deploymentType - Deployment type (docker or zip)
+   * @returns Created runtime instance
+   */
+  private createAgentRuntime(
+    config: AppConfig,
+    pattern: string,
+    agentEntry: AgentManifestEntry,
+    sharedResources: SharedAgentResources,
+    deploymentType: string
+  ): agentcore.Runtime {
+    const stack = cdk.Stack.of(this)
+    const agentName = agentEntry.name
+
+    // Create agent-specific runtime artifact
+    let agentRuntimeArtifact: agentcore.AgentRuntimeArtifact
+
+    if (deploymentType === "zip") {
+      // ZIP deployment for this agent
+      throw new Error("ZIP deployment not yet implemented for multi-agent patterns")
+    } else {
+      // Docker deployment for this agent
+      agentRuntimeArtifact = agentcore.AgentRuntimeArtifact.fromAsset(
+        path.resolve(__dirname, "..", ".."),
+        {
+          platform: ecr_assets.Platform.LINUX_ARM64,
+          file: `patterns/${pattern}/agents/${agentName}/Dockerfile`,
+        }
+      )
+    }
+
+    // Configure network mode (default to public)
+    const networkConfiguration = agentcore.RuntimeNetworkConfiguration.usingPublicNetwork()
+
+    // Configure JWT authorizer with Cognito
+    const authorizerConfiguration = agentcore.RuntimeAuthorizerConfiguration.usingJWT(
+      `https://cognito-idp.${stack.region}.amazonaws.com/${this.userPoolId}/.well-known/openid-configuration`,
+      [this.userPoolClientId]
+    )
+
+    // Environment variables for the runtime
+    const envVars: { [key: string]: string } = {
+      AWS_REGION: stack.region,
+      AWS_DEFAULT_REGION: stack.region,
+      MEMORY_ID: sharedResources.memoryId,
+      STACK_NAME: config.stack_name_base,
+      AGENT_NAME: agentName, // Agent can use this to identify itself
+    }
+
+    // Create the runtime
+    const runtime = new agentcore.Runtime(this, `Runtime-${agentName}`, {
+      runtimeName: `${config.stack_name_base.replace(/-/g, "_")}_${agentName}`,
+      agentRuntimeArtifact: agentRuntimeArtifact,
+      executionRole: sharedResources.agentRole,
+      networkConfiguration: networkConfiguration,
+      protocolConfiguration: agentcore.ProtocolType.HTTP,
+      environmentVariables: envVars,
+      authorizerConfiguration: authorizerConfiguration,
+      requestHeaderConfiguration: {
+        allowlistedHeaders: ["Authorization"],
+      },
+      description: `${agentEntry.displayName} - ${agentEntry.description}`,
+    })
+
+    return runtime
+  }
+
+  /**
+   * Stores agent metadata in SSM Parameter Store for runtime discovery.
+   * Used by backend services and will be used by frontend in Task 8.
+   * 
+   * @param config - Application configuration
+   * @param pattern - Agent pattern type (e.g., 'strands-multi-agent-orchestrator')
+   * @param agentEntry - Agent metadata from manifest
+   * @param runtime - Created runtime instance
+   * @param status - Deployment status ('success' or 'failed')
+   */
+  private storeAgentMetadata(
+    config: AppConfig,
+    pattern: string,
+    agentEntry: AgentManifestEntry,
+    runtime: agentcore.Runtime,
+    status: "success" | "failed"
+  ): void {
+    const agentName = agentEntry.name
+    const baseParam = `/${config.stack_name_base}/agents/${agentName}`
+
+    // Runtime ARN
+    new ssm.StringParameter(this, `SSMAgentRuntimeArn-${agentName}`, {
+      parameterName: `${baseParam}/runtime-arn`,
+      stringValue: runtime.agentRuntimeArn,
+      description: `Runtime ARN for ${agentEntry.displayName}`,
+    })
+
+    // Runtime ID
+    new ssm.StringParameter(this, `SSMAgentRuntimeId-${agentName}`, {
+      parameterName: `${baseParam}/runtime-id`,
+      stringValue: runtime.agentRuntimeId,
+      description: `Runtime ID for ${agentEntry.displayName}`,
+    })
+
+    // Display name
+    new ssm.StringParameter(this, `SSMAgentDisplayName-${agentName}`, {
+      parameterName: `${baseParam}/display-name`,
+      stringValue: agentEntry.displayName,
+      description: `Display name for ${agentName} agent`,
+    })
+
+    // Description
+    new ssm.StringParameter(this, `SSMAgentDescription-${agentName}`, {
+      parameterName: `${baseParam}/description`,
+      stringValue: agentEntry.description,
+      description: `Description for ${agentName} agent`,
+    })
+
+    // Is default flag
+    new ssm.StringParameter(this, `SSMAgentIsDefault-${agentName}`, {
+      parameterName: `${baseParam}/is-default`,
+      stringValue: agentEntry.isDefault.toString(),
+      description: `Whether ${agentName} is the default agent`,
+    })
+
+    // Pattern
+    new ssm.StringParameter(this, `SSMAgentPattern-${agentName}`, {
+      parameterName: `${baseParam}/pattern`,
+      stringValue: pattern,
+      description: `Pattern type for ${agentName} agent`,
+    })
+
+    // Deployment status
+    new ssm.StringParameter(this, `SSMAgentStatus-${agentName}`, {
+      parameterName: `${baseParam}/status`,
+      stringValue: status,
+      description: `Deployment status for ${agentName} agent`,
+    })
+  }
+
+  /**
+   * Stores failure metadata for agents that failed to deploy.
+   * 
+   * @param config - Application configuration
+   * @param agentEntry - Agent metadata from manifest
+   * @param errorMessage - Error message from deployment failure
+   */
+  private storeAgentFailureMetadata(
+    config: AppConfig,
+    agentEntry: AgentManifestEntry,
+    errorMessage: string
+  ): void {
+    const agentName = agentEntry.name
+    const baseParam = `/${config.stack_name_base}/agents/${agentName}`
+
+    // Deployment status
+    new ssm.StringParameter(this, `SSMAgentStatus-${agentName}`, {
+      parameterName: `${baseParam}/status`,
+      stringValue: "failed",
+      description: `Deployment status for ${agentName} agent`,
+    })
+
+    // Error message (truncate to SSM limit)
+    new ssm.StringParameter(this, `SSMAgentError-${agentName}`, {
+      parameterName: `${baseParam}/error`,
+      stringValue: errorMessage.substring(0, 4096), // SSM limit
+      description: `Error message for failed ${agentName} agent deployment`,
+    })
+
+    // Display name (for UI to show failed agent)
+    new ssm.StringParameter(this, `SSMAgentDisplayName-${agentName}`, {
+      parameterName: `${baseParam}/display-name`,
+      stringValue: agentEntry.displayName,
+      description: `Display name for ${agentName} agent`,
+    })
+  }
+
+  /**
+   * Creates CloudFormation outputs for agent runtime information.
+   * 
+   * @param config - Application configuration
+   * @param agentEntry - Agent metadata from manifest
+   * @param runtime - Created runtime instance
+   * @param status - Deployment status
+   */
+  private createAgentOutputs(
+    config: AppConfig,
+    agentEntry: AgentManifestEntry,
+    runtime: agentcore.Runtime,
+    status: "success" | "failed"
+  ): void {
+    const agentName = agentEntry.name
+
+    new cdk.CfnOutput(this, `OutputAgentRuntimeArn-${agentName}`, {
+      description: `ARN of ${agentEntry.displayName} runtime`,
+      value: runtime.agentRuntimeArn,
+      exportName: `${config.stack_name_base}-AgentRuntimeArn-${agentName}`,
+    })
+
+    new cdk.CfnOutput(this, `OutputAgentRuntimeId-${agentName}`, {
+      description: `ID of ${agentEntry.displayName} runtime`,
+      value: runtime.agentRuntimeId,
+      exportName: `${config.stack_name_base}-AgentRuntimeId-${agentName}`,
+    })
+
+    new cdk.CfnOutput(this, `OutputAgentStatus-${agentName}`, {
+      description: `Deployment status of ${agentEntry.displayName}`,
+      value: status,
+      exportName: `${config.stack_name_base}-AgentStatus-${agentName}`,
+    })
+  }
+
+  /**
+   * Creates CloudFormation outputs for failed agent deployments.
+   * 
+   * @param config - Application configuration
+   * @param agentEntry - Agent metadata from manifest
+   * @param errorMessage - Error message from deployment failure
+   */
+  private createAgentFailureOutputs(
+    config: AppConfig,
+    agentEntry: AgentManifestEntry,
+    errorMessage: string
+  ): void {
+    const agentName = agentEntry.name
+
+    new cdk.CfnOutput(this, `OutputAgentStatus-${agentName}`, {
+      description: `Deployment status of ${agentEntry.displayName}`,
+      value: "failed",
+      exportName: `${config.stack_name_base}-AgentStatus-${agentName}`,
+    })
+
+    new cdk.CfnOutput(this, `OutputAgentError-${agentName}`, {
+      description: `Error for ${agentEntry.displayName}`,
+      value: errorMessage.substring(0, 200), // CloudFormation output limit
+      exportName: `${config.stack_name_base}-AgentError-${agentName}`,
+    })
+  }
+}
+
+/**
+ * Shared resources used by all agents in multi-agent patterns.
+ */
+interface SharedAgentResources {
+  /** Memory resource instance */
+  memory: cdk.CfnResource
+  /** Memory ID for environment variables */
+  memoryId: string
+  /** Memory ARN for IAM permissions */
+  memoryArn: string
+  /** Shared execution role for all agents */
+  agentRole: AgentCoreRole
 }
