@@ -3,11 +3,13 @@
 
 import { Routes, Route } from 'react-router-dom'
 import ChatPage from './ChatPage'
+import AgentGalleryPage from './AgentGalleryPage'
 
 export default function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<ChatPage />} />
+      <Route path="/agents" element={<AgentGalleryPage />} />
     </Routes>
   )
 }

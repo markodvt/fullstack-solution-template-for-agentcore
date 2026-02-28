@@ -3,13 +3,16 @@
 
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from '@/components/auth/AuthProvider'
+import { AgentProvider } from '@/contexts/AgentContext'
 import AppRoutes from './routes'
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRoutes />
+        <AgentProvider>
+          <AppRoutes />
+        </AgentProvider>
       </AuthProvider>
     </BrowserRouter>
   )

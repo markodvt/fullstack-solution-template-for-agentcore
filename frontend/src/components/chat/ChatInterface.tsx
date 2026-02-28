@@ -209,6 +209,7 @@ export default function ChatInterface() {
               description: 'Fallback agent from configuration',
               runtimeArn: config.agentRuntimeArn,
               runtimeId: 'default',
+              pattern: 'basic',
               isDefault: true,
               status: 'success',
             }
