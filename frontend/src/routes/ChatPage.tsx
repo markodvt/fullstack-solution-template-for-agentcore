@@ -6,6 +6,7 @@ import ChatInterface from "@/components/chat/ChatInterface"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/hooks/useAuth"
 import { GlobalContextProvider } from "@/app/context/GlobalContext"
+import { NavigationBar } from "@/components/navigation/NavigationBar"
 
 export default function ChatPage() {
   const { isAuthenticated, signIn } = useAuth()
@@ -21,8 +22,11 @@ export default function ChatPage() {
 
   return (
     <GlobalContextProvider>
-      <div className="relative h-screen">
-        <ChatInterface />
+      <div className="flex flex-col h-screen">
+        <NavigationBar />
+        <div className="flex-1 overflow-hidden">
+          <ChatInterface />
+        </div>
       </div>
     </GlobalContextProvider>
   )

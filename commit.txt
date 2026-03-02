@@ -1,55 +1,76 @@
-Fix multi-agent orchestration: strands-agents-tools dependency
+Implement agent metadata enhancement and fix chat navigation
 
 Root Cause Analysis:
-The UMich agent was failing with ModuleNotFoundError for 'strands_tools'
-because strands_tools comes from a separate package (strands-agents-tools),
-not included in strands-agents. This was discovered through local testing
-and verification against PyPI package documentation.
+Two separate issues were addressed: (1) Chat navigation from Agent Details
+page was broken due to URL format mismatch (/chat?agent={name} vs
+/?agent={name}), discovered during UAT testing. (2) Agent metadata was
+limited to basic info - users needed comprehensive details including source
+code, tools, model info, and system prompts to understand agent capabilities.
 
-The orchestrator agent couldn't invoke specialist agents because:
-1. Specialist invocation functions lacked @tool decorators
-2. functools.partial objects don't preserve @tool decorator metadata
-3. Strands couldn't recognize the tools for LLM invocation
-
-What Was Fixed:
-- Added strands-agents-tools>=1.0.0 to all agent requirements.txt files
-- Added @tool decorators to specialist invocation functions
-- Implemented functools.partial parameter binding (needs wrapper class)
-- Fixed SSM parameter name (runtime_arn → runtime-arn)
-- Created comprehensive strands.md steering documentation
-- Built local testing environment for pre-deployment validation
+What Was Fixed/Added:
+- Fixed chat navigation URL from /chat?agent={name} to /?agent={name}
+- Created S3 bucket for agent source code storage with versioning
+- Implemented AST-based metadata extraction (tools, model ID, system prompts)
+- Added S3 upload for agent source code during CDK deployment
+- Enhanced SSM parameters with tools, model, system-prompt, source-code-s3-key
+- Updated Lambda to fetch source code from S3 with presigned URLs
+- Added Python syntax highlighting with react-syntax-highlighter
+- Created system prompt display component
+- Added long description support with post-deployment script
+- Created About FAST page with project information
+- Updated navigation: root redirects to /agents, FAST logo links to /about
+- Created Cognito token helper script for API testing
 
 Key Changes:
-- patterns/strands-umich-agent/requirements.txt
-- patterns/strands-colorado-agent/requirements.txt
-- patterns/strands-coder-agent/requirements.txt
-- patterns/strands-single-agent/requirements.txt
-- patterns/strands-multi-agent-orchestrator/requirements.txt
-- patterns/strands-multi-agent-orchestrator/tools/invoke_specialist.py
-- patterns/strands-multi-agent-orchestrator/agents/orchestrator/orchestrator_agent.py
-- .kiro/steering/strands.md (new)
-- patterns/local-agents/* (new testing environment)
+- frontend/src/components/agent-details/AgentDetailsActions.tsx
+- infra-cdk/lib/backend-stack.ts (S3 bucket, metadata extraction, SSM params)
+- infra-cdk/lambdas/agent-discovery/index.py (S3 integration)
+- frontend/src/components/agent-details/AgentCodeViewer.tsx (syntax highlighting)
+- frontend/src/components/agent-details/AgentSystemPrompt.tsx (new)
+- frontend/src/components/agent-details/AgentDetailsHeader.tsx (long description)
+- frontend/src/routes/AboutPage.tsx (new)
+- frontend/src/components/navigation/NavigationBar.tsx
+- frontend/src/routes/index.tsx (root redirect, /about route)
+- infra-cdk/scripts/generate-long-descriptions.py (new)
+- infra-cdk/scripts/get-cognito-token.py (new)
 
 Why This Matters:
-- UMich agent will now start successfully in AWS
-- All agents have correct dependencies for strands_tools imports
-- Orchestrator has proper tool registration (pending wrapper class pattern)
-- Local testing environment prevents future deployment issues
-- Accurate documentation prevents confusion about package structure
+- Users can now navigate seamlessly from Agent Details to chat
+- Comprehensive agent metadata improves discoverability and understanding
+- Source code visibility enables developers to learn from existing agents
+- System prompts help users understand agent behavior and capabilities
+- Long descriptions provide user-friendly explanations of agent purposes
+- About page provides project context for new users
+- Improved navigation creates better user experience across all pages
+- Post-deployment script enables AI-generated descriptions at scale
+- Helper scripts improve developer productivity for testing
 
 Next Steps:
-1. Implement wrapper class pattern for orchestrator specialist tools
-2. Deploy updated Docker images with new requirements.txt
-3. Run comprehensive UAT testing of all 4 agents
-4. Verify end-to-end multi-agent orchestration flow
+1. Run post-deployment script to generate long descriptions:
+   cd infra-cdk/scripts && python generate-long-descriptions.py
+2. Verify long descriptions display correctly in UI
+3. Complete task 1.9: UI-based description generation feature
+4. Move to Phase 4: Memory Visualization (defer Phase 3 remaining tasks)
 
 Testing:
-- Local UMich agent successfully uses http_request tool
-- Import verification tests pass for all packages
-- Ready for AWS deployment and integration testing
+- UAT conducted with 5 test cases: 5/5 passing (100%)
+- Chat navigation verified from Agent Details page
+- Multi-agent orchestration tested and working
+- Agent selection dropdown tested and working
+- Unit tests for metadata extraction: 7/7 passing
+- Source code displays with syntax highlighting
+- System prompts display correctly
+- Long descriptions display when available
+- About page displays project information
+- Navigation works across all pages
+- Screenshot displays correctly
+- TypeScript compilation successful
+- Frontend build successful
+- Backend deployment successful
 
 Documentation:
-- Created .kiro/dev-history/multi-agent-orchestration-pattern/session-summary-2026-02-26-continued.md
-- Created .kiro/steering/strands.md with correct package information
-- Documented functools.partial limitation with @tool decorator
-- Added local testing workflow documentation
+- Created .kiro/dev-history/enhanced-agent-ui/session-summary-2026-03-01-agent-metadata-enhancement.md
+- Created .kiro/dev-history/enhanced-agent-ui/uat-results-2025-02-28-phases-1-2.md
+- Created infra-cdk/scripts/README.md
+- Created infra-cdk/scripts/INSTALL.md
+- Session summaries contain full implementation details and architecture insights

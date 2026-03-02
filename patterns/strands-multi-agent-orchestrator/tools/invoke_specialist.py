@@ -26,7 +26,7 @@ from utils.ssm import get_ssm_parameter
 logger = logging.getLogger(__name__)
 
 
-def invoke_colorado(query: str, session_id: str, actor_id: str) -> str:
+def invoke_colorado(query: str, session_id: str, actor_id: str, access_token: str) -> str:
     """
     Invoke Colorado specialist agent.
     
@@ -39,6 +39,8 @@ def invoke_colorado(query: str, session_id: str, actor_id: str) -> str:
             The Colorado agent will apply its own session prefix.
         actor_id (str): User identifier for accessing long-term memory and
             maintaining consistent user identity across agents.
+        access_token (str): User's JWT token from Cognito authentication for
+            authenticating requests to the specialist agent runtime.
     
     Returns:
         str: The Colorado specialist agent's response as a string.
@@ -51,11 +53,12 @@ def invoke_colorado(query: str, session_id: str, actor_id: str) -> str:
         agent_name="colorado",
         query=query,
         session_id=session_id,
-        actor_id=actor_id
+        actor_id=actor_id,
+        access_token=access_token
     )
 
 
-def invoke_umich(query: str, session_id: str, actor_id: str) -> str:
+def invoke_umich(query: str, session_id: str, actor_id: str, access_token: str) -> str:
     """
     Invoke UMich specialist agent.
     
@@ -68,6 +71,8 @@ def invoke_umich(query: str, session_id: str, actor_id: str) -> str:
             The UMich agent will apply its own session prefix.
         actor_id (str): User identifier for accessing long-term memory and
             maintaining consistent user identity across agents.
+        access_token (str): User's JWT token from Cognito authentication for
+            authenticating requests to the specialist agent runtime.
     
     Returns:
         str: The UMich specialist agent's response as a string.
@@ -80,11 +85,12 @@ def invoke_umich(query: str, session_id: str, actor_id: str) -> str:
         agent_name="umich",
         query=query,
         session_id=session_id,
-        actor_id=actor_id
+        actor_id=actor_id,
+        access_token=access_token
     )
 
 
-def invoke_coder(query: str, session_id: str, actor_id: str) -> str:
+def invoke_coder(query: str, session_id: str, actor_id: str, access_token: str) -> str:
     """
     Invoke Coder specialist agent.
     
@@ -97,6 +103,8 @@ def invoke_coder(query: str, session_id: str, actor_id: str) -> str:
             The Coder agent will apply its own session prefix.
         actor_id (str): User identifier for accessing long-term memory and
             maintaining consistent user identity across agents.
+        access_token (str): User's JWT token from Cognito authentication for
+            authenticating requests to the specialist agent runtime.
     
     Returns:
         str: The Coder specialist agent's response as a string.
@@ -109,7 +117,8 @@ def invoke_coder(query: str, session_id: str, actor_id: str) -> str:
         agent_name="coder",
         query=query,
         session_id=session_id,
-        actor_id=actor_id
+        actor_id=actor_id,
+        access_token=access_token
     )
 
 
@@ -117,7 +126,8 @@ def _invoke_specialist(
     agent_name: str,
     query: str,
     session_id: str,
-    actor_id: str
+    actor_id: str,
+    access_token: str
 ) -> str:
     """
     Internal method to invoke a specialist agent's runtime endpoint.
@@ -136,6 +146,8 @@ def _invoke_specialist(
         query (str): User query to process.
         session_id (str): Session identifier (will be prefixed by specialist).
         actor_id (str): User identifier for memory access.
+        access_token (str): User's JWT token from Cognito authentication for
+            authenticating requests to the specialist agent runtime.
         
     Returns:
         str: Specialist agent's response as a string.
@@ -210,24 +222,14 @@ def _invoke_specialist(
         
         logger.info("Invoking runtime at URL: %s", url)
         
-        # Get AWS credentials for signing the request
-        # The agent's IAM role must have bedrock-agentcore:InvokeRuntime permission
-        session = boto3.Session()
-        credentials = session.get_credentials()
-        
-        if not credentials:
-            raise RuntimeError(
-                "Unable to retrieve AWS credentials. "
-                "Ensure the agent's IAM role is properly configured."
-            )
-        
-        # Prepare request headers
+        # Prepare request headers with JWT Bearer authentication
         # AgentCore Runtime expects:
-        # - Authorization with AWS Signature V4
+        # - Authorization: Bearer {token} for JWT authentication
         # - Content-Type: application/json
         # - X-Amzn-Bedrock-AgentCore-Runtime-Session-Id for session tracking
         headers = {
             "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
             "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": session_id,
         }
         
@@ -241,27 +243,11 @@ def _invoke_specialist(
         
         logger.debug("Request payload: %s", json.dumps(payload, indent=2))
         
-        # Make HTTP POST request to AgentCore Runtime API
-        # Use AWS SigV4 signing for authentication
-        from botocore.auth import SigV4Auth
-        from botocore.awsrequest import AWSRequest
-        
-        # Create AWS request for signing
-        request = AWSRequest(
-            method="POST",
-            url=url,
-            data=json.dumps(payload),
-            headers=headers
-        )
-        
-        # Sign the request with AWS Signature V4
-        SigV4Auth(credentials, "bedrock-agentcore", region).add_auth(request)
-        
-        # Execute the signed request
+        # Make HTTP POST request to AgentCore Runtime API with JWT authentication
         response = requests.post(
             url=url,
-            headers=dict(request.headers),
-            data=request.body,
+            headers=headers,
+            json=payload,  # Use json parameter for automatic JSON encoding
             timeout=300,  # 5 minute timeout for long-running agent responses
             stream=True  # Enable streaming to handle SSE responses
         )
@@ -354,16 +340,19 @@ class SpecialistInvocationTools:
     to provide the query parameter.
     """
     
-    def __init__(self, session_id: str, actor_id: str):
+    def __init__(self, session_id: str, actor_id: str, access_token: str):
         """
         Initialize specialist invocation tools with context parameters.
         
         Args:
             session_id (str): Session identifier for maintaining conversation context.
             actor_id (str): User identifier for accessing long-term memory.
+            access_token (str): User's JWT token from Cognito authentication for
+                authenticating requests to specialist agent runtimes.
         """
         self.session_id = session_id
         self.actor_id = actor_id
+        self.access_token = access_token
     
     @tool
     def invoke_colorado(self, query: str) -> str:
@@ -383,7 +372,8 @@ class SpecialistInvocationTools:
             agent_name="colorado",
             query=query,
             session_id=self.session_id,
-            actor_id=self.actor_id
+            actor_id=self.actor_id,
+            access_token=self.access_token
         )
     
     @tool
@@ -404,7 +394,8 @@ class SpecialistInvocationTools:
             agent_name="umich",
             query=query,
             session_id=self.session_id,
-            actor_id=self.actor_id
+            actor_id=self.actor_id,
+            access_token=self.access_token
         )
     
     @tool
@@ -425,5 +416,6 @@ class SpecialistInvocationTools:
             agent_name="coder",
             query=query,
             session_id=self.session_id,
-            actor_id=self.actor_id
+            actor_id=self.actor_id,
+            access_token=self.access_token
         )

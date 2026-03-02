@@ -15,6 +15,12 @@ export interface Agent {
   pattern: string
   isDefault: boolean
   status: 'success' | 'failed'
+  sourceCode?: string
+  sourceCodeUrl?: string
+  systemPrompt?: string
+  longDescription?: string
+  model?: string
+  tools?: string[]
 }
 
 export interface AgentDiscoveryResponse {

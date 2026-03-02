@@ -98,6 +98,14 @@ export class AgentCoreRole extends iam.Role {
               ],
             }),
             new iam.PolicyStatement({
+              sid: "CrossAgentInvocation",
+              effect: iam.Effect.ALLOW,
+              actions: ["bedrock-agentcore:InvokeAgentRuntime"],
+              resources: [
+                `arn:aws:bedrock-agentcore:${region}:${accountId}:runtime/*`,
+              ],
+            }),
+            new iam.PolicyStatement({
               sid: "SecretsManagerAccess",
               effect: iam.Effect.ALLOW,
               actions: ["secretsmanager:GetSecretValue"],

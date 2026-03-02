@@ -87,7 +87,7 @@ def create_gateway_mcp_client(access_token: str) -> MCPClient:
     return gateway_client
 
 
-def create_orchestrator_agent(user_id: str, session_id: str) -> Agent:
+def create_orchestrator_agent(user_id: str, session_id: str, user_jwt_token: str) -> Agent:
     """
     Create the orchestrator agent with specialist invocation tools and memory integration.
 
@@ -107,6 +107,8 @@ def create_orchestrator_agent(user_id: str, session_id: str) -> Agent:
                        Extracted from the validated JWT token for security.
         session_id (str): The unique identifier for this conversation session.
                           Will be prefixed with 'orchestrator_' to distinguish from specialists.
+        user_jwt_token (str): The user's JWT token from Cognito authentication.
+                              Used for authenticating requests to specialist agents.
 
     Returns:
         Agent: Configured Strands agent with routing capabilities and memory integration.
@@ -202,7 +204,8 @@ When you invoke a specialist:
         print("[ORCHESTRATOR] Step 3: Creating specialist invocation tools...")
         specialist_tools = SpecialistInvocationTools(
             session_id=session_id,
-            actor_id=user_id
+            actor_id=user_id,
+            access_token=user_jwt_token  # Pass user's JWT token for specialist authentication
         )
 
         print("[ORCHESTRATOR] Step 4: Creating Agent with all tools...")
@@ -300,13 +303,22 @@ async def agent_stream(payload: dict, context: RequestContext):
         # manipulated value from the request body
         user_id = extract_user_id_from_context(context)
 
+        # Extract the JWT token itself for passing to specialist agents
+        # Specialist agents are configured with JWT (Cognito) authorization and need the user's token
+        auth_header = context.request_headers.get("Authorization", "")
+        user_jwt_token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else auth_header
+
         print(
             f"[ORCHESTRATOR STREAM] Starting streaming invocation for user: {user_id}, session: {session_id}"
         )
         print(f"[ORCHESTRATOR STREAM] Query: {user_query}")
 
         # Create the orchestrator agent with routing capabilities and memory
-        agent = create_orchestrator_agent(user_id=user_id, session_id=session_id)
+        agent = create_orchestrator_agent(
+            user_id=user_id, 
+            session_id=session_id,
+            user_jwt_token=user_jwt_token
+        )
 
         # Stream the agent's response token-by-token for better UX
         # The agent will:

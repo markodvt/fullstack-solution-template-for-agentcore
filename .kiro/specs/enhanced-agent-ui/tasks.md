@@ -39,7 +39,9 @@ Each phase delivers working, testable functionality that users can see and use.
 
 This phase delivers the agent discovery and browsing experience. The `/api/agents` endpoint already exists, so we focus on frontend implementation with minimal backend verification.
 
-- [ ] 1. Verify existing /api/agents endpoint
+**Agent Metadata Enhancement:** This phase includes critical backend work to store agent source code in S3 (instead of SSM which has an 8KB limit) and extract metadata (tools, model ID) during CDK deployment. This enhancement is required because 3 out of 4 agent files exceed SSM's 8KB limit. See `.kiro/dev-history/enhanced-agent-ui/implementation-guide.md` for detailed implementation guidance.
+
+- [x] 1. Verify existing /api/agents endpoint
   - [x] 1.1 Test /api/agents endpoint with valid JWT
     - Call existing `/api/agents` endpoint
     - Verify response contains agent list
@@ -54,7 +56,277 @@ This phase delivers the agent discovery and browsing experience. The `/api/agent
     - Test error handling (401, 500)
     - _Requirements: 1.1, 1.2_
 
-- [ ] 2. Agent Context and State Management
+- [ ] 1.5 Agent Metadata Enhancement - S3 Storage and Metadata Extraction
+  - [ ] 1.5.1 Add S3 bucket for agent source code storage
+    - Add `aws-cdk-lib/aws-s3-deployment` import to `backend-stack.ts`
+    - Create S3 bucket in `createSharedAgentResources()` method
+    - Configure bucket: versioned, encrypted, block public access
+    - Set bucket name: `${config.stack_name_base}-agent-source-code`
+    - Set removal policy: DESTROY with auto-delete objects
+    - Update `SharedAgentResources` interface to include bucket
+    - Update return statement to include `agentSourceCodeBucket`
+    - _Requirements: 1.4, 3.6_
+  
+  - [ ] 1.5.2 Implement agent metadata extraction method
+    - Add `extractAgentMetadata()` method to `BackendStack` class
+    - Parse agent Python source code to extract tools list
+    - Parse agent Python source code to extract model ID
+    - Handle parsing errors gracefully with fallback values
+    - Return structured metadata: `{ tools: string[], modelId: string }`
+    - Add comprehensive error handling for missing files
+    - _Requirements: 1.4, 1.5, 1.6, 3.4, 3.5_
+  
+  - [ ] 1.5.3 Implement S3 upload method for agent source code
+    - Add `uploadAgentSourceToS3()` method to `BackendStack` class
+    - Use `s3deploy.BucketDeployment` to upload source code
+    - Generate S3 key: `agents/${agentName}/${agentName}_agent.py`
+    - Return S3 URL: `s3://${bucketName}/${key}`
+    - Set prune: false to preserve existing files
+    - _Requirements: 3.6_
+  
+  - [ ] 1.5.4 Update storeAgentMetadata to extract and store metadata
+    - Add `sharedResources` parameter to `storeAgentMetadata()` method
+    - Extract metadata using `extractAgentMetadata()` at method start
+    - Upload source code to S3 using `uploadAgentSourceToS3()`
+    - Create SSM parameter for tools: `${baseParam}/tools` (JSON array)
+    - Create SSM parameter for model: `${baseParam}/model` (string)
+    - Create SSM parameter for source code URL: `${baseParam}/source-code-url` (S3 URL)
+    - Handle extraction failures gracefully with logging
+    - _Requirements: 1.4, 1.5, 1.6, 3.4, 3.5, 3.6_
+  
+  - [ ] 1.5.5 Update storeAgentMetadata call sites
+    - Update `createMultiAgentRuntimes()` method
+    - Pass `sharedResources` parameter to `storeAgentMetadata()` calls
+    - Verify all call sites are updated
+    - _Requirements: 1.4_
+  
+  - [ ] 1.5.6 Enhance extractAgentMetadata to extract system prompt
+    - Update `extractAgentMetadata()` method to extract system_prompt variable
+    - Parse multi-line string assignments (triple-quoted strings)
+    - Handle both `system_prompt = """..."""` and `system_prompt = '''...'''` formats
+    - Look for system_prompt variable in create_*_agent function body
+    - Return system prompt in metadata structure
+    - Add error handling for missing system prompts (return empty string)
+    - _Requirements: 1.4, 3.2_
+  
+  - [ ] 1.5.7 Create post-deployment script to generate long descriptions
+    - Create Python script `infra-cdk/scripts/generate-long-descriptions.py`
+    - Script should run after CDK deployment completes
+    - For each agent:
+      - Fetch the agent's source code from S3
+      - Extract the docstring and system prompt from the source code
+      - Invoke the default agent via AgentCore Runtime API with a prompt like: "Based on this agent's docstring and system prompt, generate a 2-3 sentence user-friendly description that explains what this agent does and what makes it unique. Focus on capabilities and personality."
+      - Parse the agent's response to extract the generated description
+      - Store the long description in SSM parameter: `/${stack}/agents/{agent_name}/long-description`
+    - Add error handling for agent invocation failures (skip that agent, log warning)
+    - Add error handling for missing source code (skip that agent, log warning)
+    - Use boto3 for S3, SSM, and Bedrock AgentCore Runtime API calls
+    - Script should be idempotent (can be run multiple times safely)
+    - _Requirements: 1.4, 3.2_
+  
+  - [ ] 1.5.8 Update storeAgentMetadata to store system prompt
+    - Create SSM parameter for system prompt: `${baseParam}/system-prompt`
+    - Handle cases where this field might be empty string
+    - Store empty string if extraction failed (don't skip parameter creation)
+    - **Note:** Long descriptions are generated by the post-deployment script (task 1.5.7), not during CDK deployment
+    - _Requirements: 1.4, 3.2_
+  
+  - [ ]* 1.5.9 Write unit tests for metadata extraction
+    - Test `extractAgentMetadata()` with valid agent files
+    - Test tools extraction with various formats
+    - Test model ID extraction with various formats
+    - Test system prompt extraction with triple-quoted strings
+    - Test error handling for missing files
+    - Test error handling for malformed source code
+    - Test error handling for missing system prompts
+    - **Note:** Long description generation is tested separately in the post-deployment script tests
+    - _Requirements: 1.4, 1.5, 1.6, 3.2, 3.4, 3.5_
+  
+  - [ ]* 1.5.10 Write property test for metadata extraction
+    - **Property 43: Metadata Extraction Robustness**
+    - **Validates: Requirements 1.4, 1.5, 1.6, 3.2**
+    - Test that metadata extraction handles any valid Python source
+    - Use Hypothesis with minimum 100 iterations
+
+- [ ] 1.6 Agent Discovery Lambda Enhancement - S3 Integration
+  - [ ] 1.6.1 Add S3 client to agent-discovery Lambda
+    - Import boto3 S3 client in `index.py`
+    - Initialize S3 client: `s3_client = boto3.client("s3")`
+    - _Requirements: 3.6_
+  
+  - [ ] 1.6.2 Update get_agent_metadata to handle new SSM parameters
+    - Add handling for `tools` parameter (parse JSON array)
+    - Add handling for `model` parameter (string)
+    - Add handling for `source-code-url` parameter
+    - Add handling for `system-prompt` parameter (string)
+    - Add handling for `long-description` parameter (string)
+    - Parse S3 URL to extract bucket and key
+    - Generate presigned URL for source code (1 hour expiry)
+    - Fetch source code from S3 using `get_object`
+    - Decode source code from bytes to UTF-8 string
+    - Add comprehensive error handling for S3 operations
+    - Log warnings for S3 failures without breaking response
+    - Return system prompt and long description in metadata response
+    - _Requirements: 1.4, 1.5, 1.6, 3.2, 3.4, 3.5, 3.6_
+  
+  - [ ] 1.6.3 Add S3 permissions to agent-discovery Lambda
+    - Update `createAgentDiscoveryApi()` in `backend-stack.ts`
+    - Add IAM policy statement for S3 GetObject
+    - Add IAM policy statement for S3 ListBucket
+    - Set resource ARNs: bucket and bucket/*
+    - Use `config.stack_name_base` for bucket name
+    - _Requirements: 3.6_
+  
+  - [ ]* 1.6.4 Write unit tests for S3 integration
+    - Test presigned URL generation
+    - Test source code fetching from S3
+    - Test S3 URL parsing
+    - Test error handling for missing S3 objects
+    - Test error handling for S3 access denied
+    - Test JSON parsing for tools parameter
+    - Test system prompt parameter retrieval
+    - Test long description parameter retrieval
+    - _Requirements: 1.4, 1.5, 1.6, 3.2, 3.6_
+  
+  - [ ]* 1.6.5 Write property test for S3 URL parsing
+    - **Property 44: S3 URL Parsing**
+    - **Validates: Requirements 3.6**
+    - Test that S3 URL parsing handles any valid S3 URL format
+    - Use Hypothesis with minimum 100 iterations
+
+- [ ] 1.7 Deploy and verify agent metadata enhancement
+  - [ ] 1.7.1 Deploy CDK stack with metadata changes
+    - Run `cdk deploy` from `infra-cdk` directory
+    - Verify S3 bucket is created
+    - Verify agent source files are uploaded to S3
+    - Verify SSM parameters include new fields (tools, model, source-code-url)
+    - Check CloudWatch logs for any deployment errors
+    - _Requirements: 1.4, 1.5, 1.6, 3.4, 3.5, 3.6_
+  
+  - [ ] 1.7.2 Test agent discovery API with new fields
+    - Call `/api/agents` endpoint with valid JWT
+    - Verify response includes `tools` array for each agent
+    - Verify response includes `model` string for each agent
+    - Verify response includes `sourceCode` string for each agent
+    - Verify response includes `sourceCodeUrl` presigned URL for each agent
+    - Verify response includes `systemPrompt` string for each agent
+    - Test with multiple agents to ensure consistency
+    - Verify presigned URLs are accessible
+    - **Note:** `longDescription` will be available after running the post-deployment script (task 1.5.7)
+    - _Requirements: 1.4, 1.5, 1.6, 3.2, 3.4, 3.5, 3.6_
+  
+  - [ ] 1.7.3 Verify SSM parameters are correctly populated
+    - Use AWS CLI to list SSM parameters: `aws ssm get-parameters-by-path --path "/<stack>/agents" --recursive`
+    - Verify each agent has `/tools`, `/model`, and `/source-code-url` parameters
+    - Verify tools parameter contains valid JSON array
+    - Verify model parameter contains model ID string
+    - Verify source-code-url parameter contains S3 URL
+    - _Requirements: 1.4, 1.5, 1.6, 3.4, 3.5, 3.6_
+  
+  - [ ] 1.7.4 Verify S3 bucket contents
+    - Use AWS CLI to list S3 objects: `aws s3 ls s3://<stack>-agent-source-code/agents/ --recursive`
+    - Verify each agent has a source file in S3
+    - Verify file paths match expected pattern: `agents/${agentName}/${agentName}_agent.py`
+    - Download a sample file to verify content integrity
+    - _Requirements: 3.6_
+  
+  - [ ] 1.7.5 Run post-deployment script to generate long descriptions
+    - Run `python infra-cdk/scripts/generate-long-descriptions.py` after CDK deployment
+    - Verify script completes without errors
+    - Check script logs for any warnings about skipped agents
+    - Verify SSM parameters are created: `/<stack>/agents/{agent_name}/long-description`
+    - Use AWS CLI to verify: `aws ssm get-parameters-by-path --path "/<stack>/agents" --recursive | grep long-description`
+    - _Requirements: 1.4, 3.2_
+  
+  - [ ] 1.7.6 Test agent discovery API with long descriptions
+    - Call `/api/agents` endpoint with valid JWT after running post-deployment script
+    - Verify response includes `longDescription` string for each agent
+    - Verify long descriptions are user-friendly and 2-3 sentences
+    - Verify long descriptions differ from system prompts (not just copied)
+    - _Requirements: 1.4, 3.2_
+  
+  - [ ]* 1.7.7 Write integration test for end-to-end metadata flow
+    - Test CDK deployment creates all resources
+    - Test metadata extraction during deployment
+    - Test S3 upload during deployment
+    - Test SSM parameter creation during deployment
+    - Test Lambda retrieves metadata from SSM and S3
+    - Test API returns complete agent metadata
+    - Test post-deployment script generates long descriptions
+    - _Requirements: 1.4, 1.5, 1.6, 3.2, 3.4, 3.5, 3.6_
+
+- [ ] 1.9 UI-Based Long Description Generation (Alternative to Script)
+  - [ ] 1.9.1 Create backend Lambda for description generation
+    - Create `infra-cdk/lambdas/generate-description/index.py`
+    - Accept POST request with agent name
+    - Fetch agent source code from S3
+    - Extract docstring and system prompt from source
+    - Invoke default agent via AgentCore Runtime API to generate description
+    - Use prompt: "Based on this agent's docstring and system prompt, generate a 2-3 sentence user-friendly description that explains what this agent does and what makes it unique. Focus on capabilities and personality."
+    - Parse agent response to extract generated description
+    - Store description in SSM parameter: `/${stack}/agents/{agent_name}/long-description`
+    - Return generated description in response
+    - Add comprehensive error handling (400, 401, 404, 500)
+    - Add CORS headers
+    - Use JWT token from request for AgentCore authentication
+    - _Requirements: 1.4, 3.2_
+  
+  - [ ] 1.9.2 Add CDK infrastructure for description generation Lambda
+    - Define Lambda function in `backend-stack.ts`
+    - Set memory: 1024MB, timeout: 120 seconds (agent invocation can be slow)
+    - Add environment variables: STACK_NAME_BASE, CORS_ALLOWED_ORIGINS
+    - Grant IAM permissions: s3:GetObject (for source code)
+    - Grant IAM permissions: ssm:GetParameter, ssm:PutParameter
+    - Grant IAM permissions: bedrock-agentcore:InvokeAgent
+    - Create CloudWatch log group with 7-day retention
+    - Add API Gateway resource: `/agents/{agentName}/generate-description`
+    - Add POST method with Cognito authorizer
+    - Configure CORS
+    - _Requirements: 1.4, 3.2_
+  
+  - [ ] 1.9.3 Create frontend UI for description generation
+    - Add "Generate Description" button to Agent Details page
+    - Show button only for admin users (check user role from JWT)
+    - Display loading state during generation (can take 30-60 seconds)
+    - Show success message with generated description
+    - Show error message if generation fails
+    - Refresh agent data after successful generation
+    - Add confirmation dialog before generating (warns about cost/time)
+    - _Requirements: 1.4, 3.2_
+  
+  - [ ] 1.9.4 Deploy and test UI-based description generation
+    - Run `cdk deploy` to deploy Lambda and API
+    - Test API endpoint with valid JWT and agent name
+    - Verify description is generated and stored in SSM
+    - Test UI button in Agent Details page
+    - Verify loading state and success/error messages
+    - Verify description appears in agent details after generation
+    - Test with multiple agents
+    - _Requirements: 1.4, 3.2_
+  
+  - [ ]* 1.9.5 Write unit tests for description generation
+    - Test Lambda handler with valid request
+    - Test source code extraction from S3
+    - Test docstring and system prompt parsing
+    - Test agent invocation for description generation
+    - Test SSM parameter storage
+    - Test error handling for missing source code
+    - Test error handling for agent invocation failures
+    - Test frontend button visibility for admin users
+    - Test frontend loading and success states
+    - _Requirements: 1.4, 3.2_
+
+**Note:** This is an alternative to the post-deployment script approach (task 1.5.7). The UI-based approach allows on-demand generation with user authentication, avoiding the JWT token issues encountered with the script approach. Implement this if the script approach continues to have authentication problems.
+
+- [ ] 1.10 Checkpoint - Agent Metadata Enhancement Complete
+  - Ensure S3 bucket is created and populated with agent source files
+  - Ensure SSM parameters include tools, model, and source-code-url
+  - Ensure agent-discovery Lambda fetches and returns new fields
+  - Ensure API response includes tools, model, sourceCode, and sourceCodeUrl
+  - Users can now see enhanced agent metadata in the UI
+  - Ask the user if questions arise
+
+- [ ] 2. Agent Context and State Management (Frontend)
   - [x] 2.1 Create AgentContext for global agent state
     - Create `frontend/src/contexts/AgentContext.tsx`
     - Define AgentContextType interface (agents, loading, error, refetch)
@@ -90,7 +362,7 @@ This phase delivers the agent discovery and browsing experience. The `/api/agent
     - Add empty state for no agents
     - _Requirements: 1.1, 1.2, 1.3, 15.1, 15.2, 15.3_
   
-  - [~] 3.2 Implement AgentTile component
+  - [x] 3.2 Implement AgentTile component
     - Display agent name
     - Display agent description
     - Display agent model
@@ -101,7 +373,7 @@ This phase delivers the agent discovery and browsing experience. The `/api/agent
     - Use Lucide React icons
     - _Requirements: 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10_
   
-  - [~] 3.3 Add route for Agent Gallery page
+  - [x] 3.3 Add route for Agent Gallery page
     - Update React Router configuration
     - Add `/agents` route
     - Add navigation link in main navigation
@@ -123,11 +395,12 @@ This phase delivers the agent discovery and browsing experience. The `/api/agent
     - Test that all agent fields are displayed for any agent
     - Use fast-check with minimum 100 iterations
 
-- [ ] 4. Checkpoint - Agent Gallery Complete
-  - Ensure Agent Gallery page displays all agents
+- [x] 4. Checkpoint - Agent Gallery Complete
+  - Ensure S3-based agent metadata enhancement is complete
+  - Ensure Agent Gallery page displays all agents with enhanced metadata
   - Ensure navigation works correctly
   - Ensure error handling works
-  - Users can now browse and discover agents
+  - Users can now browse and discover agents with tools and model information
   - Ask the user if questions arise
 
 
@@ -136,7 +409,7 @@ This phase delivers the agent discovery and browsing experience. The `/api/agent
 This phase delivers agent details and enhanced chat functionality. No new backend work is needed - we reuse existing endpoints.
 
 - [ ] 5. Agent Details Page
-  - [ ] 5.1 Create Agent Details page component structure
+  - [x] 5.1 Create Agent Details page component structure
     - Create `frontend/src/pages/AgentDetailsPage.tsx`
     - Create AgentDetailsHeader component (name, status, back button)
     - Create AgentDetailsOverview component
@@ -146,7 +419,7 @@ This phase delivers agent details and enhanced chat functionality. No new backen
     - Add breadcrumb navigation
     - _Requirements: 3.1, 3.2_
   
-  - [ ] 5.2 Implement agent metadata display
+  - [x] 5.2 Implement agent metadata display
     - Display agent name
     - Display agent description
     - Display agent model specification
@@ -156,7 +429,7 @@ This phase delivers agent details and enhanced chat functionality. No new backen
     - Use shadcn/ui components (Card, Badge, Button)
     - _Requirements: 3.2, 3.3, 3.4, 3.5, 3.7, 3.8_
   
-  - [ ] 5.3 Implement code viewer with syntax highlighting
+  - [x] 5.3 Implement code viewer with syntax highlighting
     - Install react-syntax-highlighter dependency
     - Display agent Python source code
     - Add syntax highlighting for Python
@@ -164,14 +437,14 @@ This phase delivers agent details and enhanced chat functionality. No new backen
     - Handle missing source code gracefully
     - _Requirements: 3.6_
   
-  - [ ] 5.4 Implement chat button with status handling
+  - [x] 5.4 Implement chat button with status handling
     - Add "Chat" button in actions section
     - Disable button if deployment status is "failed"
     - Navigate to `/chat?agent=:agentName` on click
     - Add visual indicator for disabled state
     - _Requirements: 3.9, 3.10_
   
-  - [ ] 5.5 Add route for Agent Details page
+  - [x] 5.5 Add route for Agent Details page
     - Update React Router configuration
     - Add `/agents/:agentName` route
     - Extract agentName from route params
@@ -199,21 +472,21 @@ This phase delivers agent details and enhanced chat functionality. No new backen
     - Use fast-check with minimum 100 iterations
 
 - [ ] 6. Chat Page Enhancement
-  - [ ] 6.1 Add agent selector to chat page
+  - [x] 6.1 Add agent selector to chat page
     - Update `frontend/src/pages/ChatPage.tsx` (or equivalent)
     - Add AgentSelector dropdown component in chat header
     - Populate dropdown with agents from useAgents hook
     - Display selected agent name prominently in header
     - _Requirements: 4.1, 4.3_
   
-  - [ ] 6.2 Implement URL query parameter handling
+  - [x] 6.2 Implement URL query parameter handling
     - Read `agent` query parameter from URL on page load
     - If present, select that agent in dropdown
     - If not present, use default agent
     - Update URL when agent is changed via dropdown
     - _Requirements: 4.1_
   
-  - [ ] 6.3 Update AgentCore client connection logic
+  - [x] 6.3 Update AgentCore client connection logic
     - Retrieve Runtime ARN for selected agent
     - Establish connection to selected agent's Runtime ARN
     - Disconnect from previous agent when switching
@@ -221,7 +494,7 @@ This phase delivers agent details and enhanced chat functionality. No new backen
     - Maintain existing streaming functionality
     - _Requirements: 4.2, 4.5, 4.6_
   
-  - [ ] 6.4 Implement agent switching functionality
+  - [x] 6.4 Implement agent switching functionality
     - Handle agent selector change event
     - Update URL query parameter
     - Disconnect current agent connection
@@ -251,7 +524,7 @@ This phase delivers agent details and enhanced chat functionality. No new backen
     - Use fast-check with minimum 100 iterations
 
 - [ ] 7. Navigation Enhancement
-  - [ ] 7.1 Update main navigation component
+  - [x] 7.1 Update main navigation component
     - Add "Agents" link to `/agents`
     - Add active link highlighting
     - Use Lucide React icons
@@ -264,7 +537,7 @@ This phase delivers agent details and enhanced chat functionality. No new backen
     - Test navigation to each page
     - _Requirements: 1.1_
 
-- [ ] 8. Checkpoint - Agent Details & Chat Complete
+- [x] 8. Checkpoint - Agent Details & Chat Complete
   - Ensure Agent Details page displays all information
   - Ensure chat page has agent selector
   - Ensure agent switching works

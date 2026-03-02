@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { ChatHeader } from "./ChatHeader"
 import { ChatInput } from "./ChatInput"
 import { ChatMessages } from "./ChatMessages"
@@ -25,6 +26,9 @@ import { discoverAgents, getDefaultAgent, type Agent } from "@/services/agentDis
  * - AgentCore client initialization and updates
  */
 export default function ChatInterface() {
+  // URL query parameters for agent selection
+  const [searchParams, setSearchParams] = useSearchParams()
+  
   // Agent management state
   const [agents, setAgents] = useState<Agent[]>([])
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
@@ -124,7 +128,7 @@ export default function ChatInterface() {
 
   /**
    * Handle agent selection change.
-   * Saves current conversation, loads new agent's conversation, and updates client.
+   * Saves current conversation, loads new agent's conversation, updates client, and updates URL.
    * 
    * @param agent - Newly selected agent
    */
@@ -146,6 +150,9 @@ export default function ChatInterface() {
     // Update selected agent
     setSelectedAgent(agent)
     localStorage.setItem('selectedAgentName', agent.name)
+
+    // Update URL query parameter
+    setSearchParams({ agent: agent.name })
 
     // Initialize client for new agent
     await initializeClientForAgent(agent)
@@ -173,20 +180,41 @@ export default function ChatInterface() {
 
         setAgents(discoveryResult.agents)
 
-        // Load selected agent from localStorage or use default
-        const storedAgentName = localStorage.getItem('selectedAgentName')
+        // Determine which agent to select (priority order):
+        // 1. URL query parameter (?agent=name)
+        // 2. localStorage (previously selected agent)
+        // 3. Default agent
+        const urlAgentName = searchParams.get('agent')
         let agentToSelect: Agent | null = null
 
-        if (storedAgentName) {
-          agentToSelect = discoveryResult.agents.find(a => a.name === storedAgentName) || null
+        // First, try URL query parameter
+        if (urlAgentName) {
+          agentToSelect = discoveryResult.agents.find(a => a.name === urlAgentName) || null
+          if (!agentToSelect) {
+            console.warn(`Agent "${urlAgentName}" from URL not found, falling back to default`)
+          }
         }
 
+        // Second, try localStorage
+        if (!agentToSelect) {
+          const storedAgentName = localStorage.getItem('selectedAgentName')
+          if (storedAgentName) {
+            agentToSelect = discoveryResult.agents.find(a => a.name === storedAgentName) || null
+          }
+        }
+
+        // Third, use default agent
         if (!agentToSelect) {
           agentToSelect = getDefaultAgent(discoveryResult.agents)
         }
 
         if (agentToSelect) {
           setSelectedAgent(agentToSelect)
+          localStorage.setItem('selectedAgentName', agentToSelect.name)
+          
+          // Update URL to reflect selected agent
+          setSearchParams({ agent: agentToSelect.name }, { replace: true })
+          
           await initializeClientForAgent(agentToSelect)
         }
       } catch (err) {
@@ -226,7 +254,7 @@ export default function ChatInterface() {
     }
 
     discoverAndInitialize()
-  }, [auth.isAuthenticated, auth.user?.access_token])
+  }, [auth.isAuthenticated, auth.user?.access_token, searchParams, setSearchParams])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })

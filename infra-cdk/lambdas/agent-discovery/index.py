@@ -26,6 +26,7 @@ logger.setLevel(logging.INFO)
 
 # Initialize AWS clients
 ssm_client = boto3.client("ssm")
+s3_client = boto3.client("s3")
 
 
 def get_agent_metadata(
@@ -77,6 +78,61 @@ def get_agent_metadata(
                 metadata["error"] = param_value
             elif param_name == "pattern":
                 metadata["pattern"] = param_value
+            elif param_name == "tools":
+                # Parse tools JSON array
+                try:
+                    metadata["tools"] = json.loads(param_value)
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse tools JSON for {agent_name}")
+                    metadata["tools"] = []
+            elif param_name == "model":
+                # Store model ID as string
+                metadata["model"] = param_value
+            elif param_name == "source-code-url":
+                # Handle S3 source code URL
+                try:
+                    if param_value.startswith("s3://"):
+                        # Parse S3 URL to extract bucket and key
+                        s3_url_parts = param_value[5:].split("/", 1)
+                        if len(s3_url_parts) == 2:
+                            bucket, key = s3_url_parts
+                            
+                            # Generate presigned URL (1 hour expiry)
+                            metadata["sourceCodeUrl"] = s3_client.generate_presigned_url(
+                                'get_object',
+                                Params={'Bucket': bucket, 'Key': key},
+                                ExpiresIn=3600
+                            )
+                            
+                            # Fetch source code from S3
+                            try:
+                                obj = s3_client.get_object(Bucket=bucket, Key=key)
+                                # Decode source code from bytes to UTF-8 string
+                                metadata["sourceCode"] = obj['Body'].read().decode('utf-8')
+                            except ClientError as s3_error:
+                                logger.warning(
+                                    f"Failed to fetch source code from S3 for {agent_name}: {s3_error}"
+                                )
+                                metadata["sourceCode"] = None
+                        else:
+                            logger.warning(
+                                f"Invalid S3 URL format for {agent_name}: {param_value}"
+                            )
+                    else:
+                        logger.warning(
+                            f"Source code URL is not an S3 URL for {agent_name}: {param_value}"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to process source code URL for {agent_name}: {e}"
+                    )
+                    metadata["sourceCode"] = None
+            elif param_name == "system-prompt":
+                # Store system prompt as string
+                metadata["systemPrompt"] = param_value
+            elif param_name == "long-description":
+                # Store long description as string
+                metadata["longDescription"] = param_value
 
         # Validate required fields
         required_fields = ["displayName", "status"]
