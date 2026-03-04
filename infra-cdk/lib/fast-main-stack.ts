@@ -83,6 +83,12 @@ export class FastMainStack extends cdk.Stack {
       exportName: `${props.config.stack_name_base}-FeedbackApiUrl`,
     })
 
+    new cdk.CfnOutput(this, "MemoryApiUrl", {
+      value: this.backendStack.memoryApiUrl,
+      description: "Memory API Gateway URL",
+      exportName: `${props.config.stack_name_base}-MemoryApiUrl`,
+    })
+
     new cdk.CfnOutput(this, "AmplifyConsoleUrl", {
       value: `https://console.aws.amazon.com/amplify/apps/${this.amplifyHostingStack.amplifyApp.appId}`,
       description: "Amplify Console URL for monitoring deployments",

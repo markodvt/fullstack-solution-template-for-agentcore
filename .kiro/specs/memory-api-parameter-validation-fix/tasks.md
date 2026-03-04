@@ -1,0 +1,128 @@
+# Implementation Plan
+
+- [x] 1. Write bug condition exploration test
+  - **Property 1: Fault Condition** - Memory API Parameter Validation
+  - **CRITICAL**: This test MUST FAIL on unfixed code - failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior - it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate the bug exists
+  - **Scoped PBT Approach**: Test the specific failing API calls with incorrect parameters to ensure reproducibility
+  - Create validation script `infra-cdk/scripts/test_memory_api_bug.py` that:
+    - Tests `list_events()` call without actorId/sessionId URI parameters (will fail with "Missing required parameter" error)
+    - Tests `retrieve_memory_records()` method call (will fail with AttributeError)
+    - Tests `list_memory_records()` call with correct parameters (should succeed, confirming correct API signature)
+    - Tests `list_events()` call with correct actorId/sessionId URI parameters (should succeed, confirming correct API signature)
+  - The test assertions should match the Expected Behavior Properties from design:
+    - Assert that incorrect parameters cause HTTP 400 or AttributeError
+    - Assert that correct parameters return HTTP 200 with memory records
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct - it proves the bug exists)
+  - Document counterexamples found to understand root cause:
+    - Exact error messages from ListEvents API
+    - AttributeError message from retrieve_memory_records
+    - Successful responses from corrected API calls
+  - Mark task complete when test is written, run, and failure is documented
+  - _Requirements: 1.1, 1.2, 1.3, 1.4_
+
+- [ ] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - Non-API-Call Logic Unchanged
+  - **IMPORTANT**: Follow observation-first methodology
+  - Observe behavior on UNFIXED code for non-API-call logic:
+    - JWT extraction with various token formats
+    - Filtering with different combinations (agentName, userId, both, neither)
+    - Sorting with "asc" and "desc" orders
+    - Transformation of memory records to frontend format
+    - CORS header generation for various origins
+    - Error handling for 401, 400, 500 scenarios
+  - Write property-based tests capturing observed behavior patterns from Preservation Requirements:
+    - Test `extract_user_id_from_jwt()` with generated JWT tokens
+    - Test `filter_memories()` with generated filter combinations
+    - Test `sort_memories()` with generated memory lists
+    - Test `transform_memory_records()` with generated memory records (after removing events parameter)
+    - Test `get_cors_headers()` with generated origins
+    - Test error responses with various invalid inputs
+  - Property-based testing generates many test cases for stronger guarantees
+  - Run tests on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8_
+
+- [-] 3. Fix Memory API parameter validation issues
+
+  - [x] 3.1 Remove ListEvents call entirely
+    - Delete `list_memory_events()` function (lines ~68-110)
+    - Remove call to `list_memory_events()` in handler (around line 445)
+    - Remove events parameter from `transform_memory_records()` call (around line 455)
+    - Justification: Lambda lists memories across all sessions, but ListEvents requires specific sessionId
+    - Long-term memory records from ListMemoryRecords are sufficient for Memory page UI
+    - _Bug_Condition: isBugCondition(input) where input.method == "list_events" AND input.uri_parameters NOT CONTAINS "actorId" AND input.uri_parameters NOT CONTAINS "sessionId"_
+    - _Expected_Behavior: Remove ListEvents call to avoid parameter validation errors_
+    - _Preservation: JWT extraction, filtering, sorting, CORS handling, error handling remain unchanged_
+    - _Requirements: 1.1, 2.1, 3.1, 3.2, 3.3, 3.5, 3.6, 3.7_
+
+  - [x] 3.2 Fix list_memory_records method name and parameters
+    - Rename function from `retrieve_memory_records_by_namespace()` to match API method (lines ~114-163)
+    - Change method call from `agentcore_client.retrieve_memory_records()` to `agentcore_client.list_memory_records()` (line ~149)
+    - Remove `searchCriteria` parameter (not valid in AWS API)
+    - Keep `memoryId` (required URI parameter)
+    - Keep `namespace` (required body parameter)
+    - Keep `maxResults` (optional body parameter)
+    - Keep `nextToken` (optional body parameter)
+    - Verify correct response key name from AWS documentation (line ~155)
+    - Update `response.get('memoryRecords', [])` to correct key if different
+    - _Bug_Condition: isBugCondition(input) where input.method == "retrieve_memory_records" AND method_exists("retrieve_memory_records") == FALSE_
+    - _Expected_Behavior: Use correct method name `list_memory_records()` with correct parameters_
+    - _Preservation: Namespace construction, pagination handling, error handling remain unchanged_
+    - _Requirements: 1.2, 2.2, 2.3, 3.8_
+
+  - [x] 3.3 Update transform_memory_records function
+    - Remove `events: List[Dict[str, Any]]` parameter from function signature (line ~232)
+    - Remove loop that transforms events (lines ~260-273)
+    - Update function to only accept `records` parameter
+    - Preserve all existing transformation logic for memory records
+    - _Bug_Condition: N/A (supporting change for removing ListEvents)_
+    - _Expected_Behavior: Transform only long-term memory records without events_
+    - _Preservation: Memory record transformation logic remains unchanged_
+    - _Requirements: 2.4, 2.5, 3.4_
+
+  - [x] 3.4 Update handler function
+    - Remove `list_memory_events()` call (lines ~445-451)
+    - Update `transform_memory_records()` call to remove events parameter (line ~455)
+    - Preserve all existing request processing, filtering, sorting, and response formatting
+    - _Bug_Condition: N/A (supporting change for removing ListEvents)_
+    - _Expected_Behavior: Handler processes requests without calling ListEvents_
+    - _Preservation: Request processing, filtering, sorting, CORS handling, error handling remain unchanged_
+    - _Requirements: 2.4, 2.5, 3.1, 3.2, 3.3, 3.5, 3.6, 3.7_
+
+  - [x] 3.5 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** - Memory API Parameter Validation Fixed
+    - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
+    - The test from task 1 encodes the expected behavior
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run bug condition exploration test from step 1
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
+    - Verify `list_memory_records()` is called with correct parameters
+    - Verify response from `list_memory_records()` is correctly parsed
+    - Verify no AttributeError occurs
+    - Verify no "Missing required parameter" errors occur
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+
+  - [ ] 3.6 Verify preservation tests still pass
+    - **Property 2: Preservation** - Non-API-Call Logic Unchanged
+    - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
+    - Run preservation property tests from step 2
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - Confirm all tests still pass after fix (no regressions):
+      - JWT extraction works correctly
+      - Filtering produces same results
+      - Sorting produces same results
+      - Transformation produces same output format
+      - CORS headers are correct
+      - Error handling is preserved
+
+- [ ] 4. Checkpoint - Ensure all tests pass
+  - Run all unit tests for Memory Lambda
+  - Run all property-based tests for preservation
+  - Run integration test with full Lambda handler
+  - Verify Memory page in frontend displays memories correctly
+  - Ensure all tests pass, ask the user if questions arise

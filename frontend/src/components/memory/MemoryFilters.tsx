@@ -1,0 +1,192 @@
+/**
+ * MemoryFilters provides filtering controls for the memory list.
+ * 
+ * This component:
+ * - Provides agent name filter dropdown
+ * - Provides user ID filter text input with debounce
+ * - Provides sort order toggle
+ * - Displays active filters
+ * - Provides clear filters button
+ * - Sticky positioning on desktop for better visibility during scroll
+ * - Filter count badge to show number of active filters
+ * - Improved mobile layout with better touch targets
+ * 
+ * Requirements: 15.3, 36.3
+ */
+
+import { useState, useEffect } from 'react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
+import { X, ArrowUpDown, Filter } from 'lucide-react'
+import { Agent } from '@/services/agentDiscoveryService'
+import { MemoryFilters as MemoryFiltersType } from '@/services/memoryService'
+
+interface MemoryFiltersProps {
+  agents: Agent[]
+  filters: MemoryFiltersType
+  onFiltersChange: (filters: MemoryFiltersType) => void
+}
+
+export default function MemoryFilters({ agents, filters, onFiltersChange }: MemoryFiltersProps) {
+  const [userIdInput, setUserIdInput] = useState(filters.userId || '')
+
+  // Sync userIdInput with filters.userId when it changes externally (e.g., page refresh, clear filters)
+  useEffect(() => {
+    // Only update if different to avoid infinite loop
+    const filterValue = filters.userId || ''
+    if (userIdInput !== filterValue) {
+      setUserIdInput(filterValue)
+    }
+  }, [filters.userId, userIdInput])
+
+  // Debounce user ID input changes to parent
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const normalizedInput = userIdInput || undefined
+      if (normalizedInput !== filters.userId) {
+        onFiltersChange({ ...filters, userId: normalizedInput })
+      }
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [userIdInput])
+
+  const handleAgentChange = (value: string) => {
+    onFiltersChange({
+      ...filters,
+      agentName: value === 'all' ? undefined : value,
+    })
+  }
+
+  const handleSortOrderToggle = () => {
+    onFiltersChange({
+      ...filters,
+      sortOrder: filters.sortOrder === 'desc' ? 'asc' : 'desc',
+    })
+  }
+
+  const handleClearFilters = () => {
+    setUserIdInput('')
+    onFiltersChange({
+      sortOrder: 'desc',
+    })
+  }
+
+  const hasActiveFilters = filters.agentName || filters.userId
+  
+  // Calculate active filter count
+  const activeFilterCount = [filters.agentName, filters.userId].filter(Boolean).length
+
+  return (
+    <div className="md:sticky md:top-0 md:z-10 md:bg-background md:pt-4 md:pb-2 md:border-b md:border-border md:shadow-sm space-y-3 mb-5">
+      {/* Filter Header with Count Badge */}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium text-muted-foreground">Filters</span>
+          {activeFilterCount > 0 && (
+            <Badge variant="default" className="h-5 px-1.5 text-xs">
+              {activeFilterCount}
+            </Badge>
+          )}
+        </div>
+        {hasActiveFilters && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleClearFilters}
+            className="gap-1.5 h-7 text-xs"
+          >
+            <X className="h-3 w-3" />
+            Clear All
+          </Button>
+        )}
+      </div>
+
+      {/* Filter Controls - Improved Mobile Layout */}
+      <div className="flex flex-col gap-2.5">
+        {/* Row 1: Agent and User ID filters (stack on mobile) */}
+        <div className="flex flex-col sm:flex-row gap-2.5">
+          {/* Agent Name Filter */}
+          <div className="flex-1 min-w-0">
+            <Select
+              value={filters.agentName || 'all'}
+              onValueChange={handleAgentChange}
+            >
+              <SelectTrigger className="h-10 sm:h-9 w-full">
+                <SelectValue placeholder="Filter by agent" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Agents</SelectItem>
+                {agents.map((agent) => (
+                  <SelectItem key={agent.name} value={agent.name}>
+                    {agent.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* User ID Filter */}
+          <div className="flex-1 min-w-0">
+            <Input
+              type="search"
+              autoComplete="off"
+              placeholder="Filter by user ID"
+              value={userIdInput}
+              onChange={(e) => setUserIdInput(e.target.value)}
+              className="h-10 sm:h-9 w-full"
+            />
+          </div>
+        </div>
+
+        {/* Row 2: Sort Order Toggle (full width on mobile) */}
+        <div className="flex">
+          <Button
+            variant="outline"
+            onClick={handleSortOrderToggle}
+            className="gap-2 h-10 sm:h-9 w-full sm:w-auto"
+          >
+            <ArrowUpDown className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+            <span>{filters.sortOrder === 'desc' ? 'Newest First' : 'Oldest First'}</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* Active Filters Display */}
+      {hasActiveFilters && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {filters.agentName && (
+            <Badge variant="secondary" className="gap-1 text-xs py-1 px-2.5">
+              Agent: {agents.find(a => a.name === filters.agentName)?.displayName || filters.agentName}
+              <button
+                onClick={() => onFiltersChange({ ...filters, agentName: undefined })}
+                className="ml-1 hover:text-destructive transition-colors"
+                aria-label="Remove agent filter"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          )}
+          {filters.userId && (
+            <Badge variant="secondary" className="gap-1 text-xs py-1 px-2.5">
+              User: {filters.userId}
+              <button
+                onClick={() => {
+                  setUserIdInput('')
+                  onFiltersChange({ ...filters, userId: undefined })
+                }}
+                className="ml-1 hover:text-destructive transition-colors"
+                aria-label="Remove user filter"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

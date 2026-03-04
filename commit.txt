@@ -1,76 +1,301 @@
-Implement agent metadata enhancement and fix chat navigation
+Implement Memory Visualization and Enhancements (Phase 4 & 5)
 
-Root Cause Analysis:
-Two separate issues were addressed: (1) Chat navigation from Agent Details
-page was broken due to URL format mismatch (/chat?agent={name} vs
-/?agent={name}), discovered during UAT testing. (2) Agent metadata was
-limited to basic info - users needed comprehensive details including source
-code, tools, model info, and system prompts to understand agent capabilities.
+## Summary
+Implemented complete Memory Visualization feature with advanced filtering, statistics dashboard, collapsible sections, and visual enhancements. Feature displays agent long-term memories stored in AgentCore Memory service with comprehensive UI/UX improvements across two major phases spanning 8 development sessions.
 
-What Was Fixed/Added:
-- Fixed chat navigation URL from /chat?agent={name} to /?agent={name}
-- Created S3 bucket for agent source code storage with versioning
-- Implemented AST-based metadata extraction (tools, model ID, system prompts)
-- Added S3 upload for agent source code during CDK deployment
-- Enhanced SSM parameters with tools, model, system-prompt, source-code-s3-key
-- Updated Lambda to fetch source code from S3 with presigned URLs
-- Added Python syntax highlighting with react-syntax-highlighter
-- Created system prompt display component
-- Added long description support with post-deployment script
-- Created About FAST page with project information
-- Updated navigation: root redirects to /agents, FAST logo links to /about
-- Created Cognito token helper script for API testing
+## Root Cause
+Users needed visibility into agent long-term memories to understand what information agents retain across sessions. Without this visibility, users couldn't verify memory storage, debug agent behavior, understand memory usage patterns, or efficiently navigate large memory datasets.
 
-Key Changes:
-- frontend/src/components/agent-details/AgentDetailsActions.tsx
-- infra-cdk/lib/backend-stack.ts (S3 bucket, metadata extraction, SSM params)
-- infra-cdk/lambdas/agent-discovery/index.py (S3 integration)
-- frontend/src/components/agent-details/AgentCodeViewer.tsx (syntax highlighting)
-- frontend/src/components/agent-details/AgentSystemPrompt.tsx (new)
-- frontend/src/components/agent-details/AgentDetailsHeader.tsx (long description)
-- frontend/src/routes/AboutPage.tsx (new)
-- frontend/src/components/navigation/NavigationBar.tsx
-- frontend/src/routes/index.tsx (root redirect, /about route)
-- infra-cdk/scripts/generate-long-descriptions.py (new)
-- infra-cdk/scripts/get-cognito-token.py (new)
+## Solution
 
-Why This Matters:
-- Users can now navigate seamlessly from Agent Details to chat
-- Comprehensive agent metadata improves discoverability and understanding
-- Source code visibility enables developers to learn from existing agents
-- System prompts help users understand agent behavior and capabilities
-- Long descriptions provide user-friendly explanations of agent purposes
-- About page provides project context for new users
-- Improved navigation creates better user experience across all pages
-- Post-deployment script enables AI-generated descriptions at scale
-- Helper scripts improve developer productivity for testing
+### Phase 4: Memory Visualization Foundation (4 Sessions)
 
-Next Steps:
-1. Run post-deployment script to generate long descriptions:
-   cd infra-cdk/scripts && python generate-long-descriptions.py
-2. Verify long descriptions display correctly in UI
-3. Complete task 1.9: UI-based description generation feature
-4. Move to Phase 4: Memory Visualization (defer Phase 3 remaining tasks)
+#### Session 1: Frontend Implementation
+- Created Memory page with responsive grid layout (1-3 columns)
+- Implemented MemoryCard component with namespace badges, timestamps, and content preview
+- Implemented MemoryFilters component with agent dropdown, user ID search (debounced 500ms), and sort toggle
+- Added loading skeletons, error states, and empty states
+- Integrated with navigation and routing
 
-Testing:
-- UAT conducted with 5 test cases: 5/5 passing (100%)
-- Chat navigation verified from Agent Details page
-- Multi-agent orchestration tested and working
-- Agent selection dropdown tested and working
-- Unit tests for metadata extraction: 7/7 passing
-- Source code displays with syntax highlighting
-- System prompts display correctly
-- Long descriptions display when available
-- About page displays project information
-- Navigation works across all pages
-- Screenshot displays correctly
-- TypeScript compilation successful
-- Frontend build successful
-- Backend deployment successful
+#### Session 2: Memory API Parameter Fix
+- Fixed AgentCore Memory API searchCriteria parameter (required non-empty searchQuery)
+- Used wildcard "*" pattern to retrieve all memory records
+- Established MCP documentation access workflow to prevent future API guessing
+- Created comprehensive steering document for documentation-first development
 
-Documentation:
-- Created .kiro/dev-history/enhanced-agent-ui/session-summary-2026-03-01-agent-metadata-enhancement.md
-- Created .kiro/dev-history/enhanced-agent-ui/uat-results-2025-02-28-phases-1-2.md
-- Created infra-cdk/scripts/README.md
-- Created infra-cdk/scripts/INSTALL.md
-- Session summaries contain full implementation details and architecture insights
+#### Session 3: Field Mapping Fix
+- Created diagnostic script to test Memory API directly and capture actual response structure
+- Fixed field mapping in Lambda transformation function:
+  - memoryRecordId → eventId (was incorrectly using recordId)
+  - content.text → content (extract text from nested object)
+  - namespaces[0] → namespace (extract first element from array)
+  - createdAt → timestamp (was incorrectly using timestamp)
+
+#### Session 4: IAM Permissions Fix
+- Added missing bedrock-agentcore:ListMemoryRecords permission to Lambda IAM policy
+- Verified Memory API returns 200 OK with 106 memories
+- Confirmed all filtering and sorting functionality works correctly
+
+### Phase 5: Memory Enhancements (4 Sessions)
+
+#### Session 1: Statistics Dashboard
+- Created MemoryStats component with total count, by-type breakdown, and by-agent distribution
+- Implemented real-time statistics calculation using useMemo for performance
+- Added visual stat cards with icons and color coding
+
+#### Session 2: Collapsible Sections
+- Created MemorySection component for grouping memories by strategy
+- Implemented localStorage persistence for section expand/collapse state
+- Added section headers with memory counts and chevron indicators
+- Created MemoryExpandContext for global expand/collapse controls
+
+#### Session 3: Visual Enhancements
+- Added collapsed memory card previews with "Show More" button
+- Implemented memory type icons (📝 summary, ⭐ preference, 💡 fact)
+- Made filters sticky on desktop with count badge
+- Added Expand All / Collapse All controls to page header
+- Optimized layout with better spacing and visual hierarchy
+
+#### Session 4: Backend Filtering Fixes
+- Fixed backend filtering to use partial matching for userId (case-insensitive contains)
+- Fixed frontend userId input to prevent password manager popup (type="search", autoComplete="off")
+- Enhanced backend logging for filter debugging
+- Deployed and verified filtering works correctly
+
+## Key Files Changed
+
+### Frontend Components (New - Phase 4)
+- frontend/src/components/memory/MemoryCard.tsx - Individual memory display
+- frontend/src/components/memory/MemoryFilters.tsx - Filter controls with debouncing
+- frontend/src/components/memory/MemoryList.tsx - Memory grid layout
+- frontend/src/components/memory/MemoryPageHeader.tsx - Page header
+- frontend/src/routes/MemoryPage.tsx - Main Memory page component
+- frontend/src/services/memoryService.ts - Memory API service layer
+
+### Frontend Components (New - Phase 5)
+- frontend/src/components/memory/MemoryStats.tsx - Statistics dashboard
+- frontend/src/components/memory/MemorySection.tsx - Collapsible sections
+- frontend/src/contexts/MemoryExpandContext.tsx - Global expand/collapse state
+
+### Frontend Components (Updated - Phase 5)
+- frontend/src/components/memory/MemoryCard.tsx - Added collapsed preview, type icons
+- frontend/src/components/memory/MemoryFilters.tsx - Fixed state sync, added sticky positioning, password manager fix
+- frontend/src/components/memory/MemoryList.tsx - Integrated section-based grouping
+- frontend/src/components/memory/MemoryPageHeader.tsx - Added expand/collapse controls
+- frontend/src/routes/MemoryPage.tsx - Integrated all Phase 5 components
+
+### Frontend Modifications (Phase 4)
+- frontend/src/routes/index.tsx - Added /memory route
+- frontend/src/components/navigation/NavigationBar.tsx - Added Memory link
+
+### Frontend Styles (Phase 5)
+- frontend/src/styles/memory.css - Sticky filters, statistics layout, section animations, type icons
+
+### Backend Lambda (New - Phase 4)
+- infra-cdk/lambdas/memory/index.py - Memory API Lambda handler
+- infra-cdk/lambdas/memory/MEMORY_API_SCHEMAS.md - API schema documentation
+
+### Backend Lambda (Updated - Phase 5)
+- infra-cdk/lambdas/memory/index.py - Fixed filtering logic for partial userId matching
+
+### Backend Infrastructure (Phase 4)
+- infra-cdk/lib/backend-stack.ts - Added Memory Lambda, API Gateway resource, IAM permissions
+- infra-cdk/lib/fast-main-stack.ts - Added MemoryApiUrl CloudFormation output
+- scripts/deploy-frontend.py - Added memoryApiUrl to aws-exports.json
+
+### Diagnostic Scripts (New - Phase 4)
+- infra-cdk/scripts/test_memory_api_response.py - Diagnostic script for testing Memory API
+- infra-cdk/scripts/test_memory_api_bug.py - Bug reproduction script
+- infra-cdk/scripts/validate_memory_api.py - API validation script
+- infra-cdk/scripts/get_memory_id.sh - Helper script to get Memory ID
+
+### Documentation (New)
+- .kiro/dev-history/enhanced-agent-ui/session-summary-2026-03-02-memory-visualization-implementation.md - Phase 4 complete session summary
+- .kiro/dev-history/enhanced-agent-ui/session-summary-2026-03-03-memory-filtering-implementation.md - Phase 5 complete session summary
+- .kiro/specs/enhanced-agent-ui/PHASE4_DEPLOYMENT_GUIDE.md - Deployment guide
+- .kiro/specs/memory-api-parameter-validation-fix/ - Bugfix spec directory
+- .kiro/steering/mcp-documentation-access.md - MCP documentation access guide
+- .kiro/steering/backend-api-patterns.md - Backend API integration patterns
+
+### Spec Updates
+- .kiro/specs/enhanced-agent-ui/tasks.md - Marked Phase 4 and Phase 5 tasks complete
+
+## Testing Validation
+
+### Phase 4 Testing
+- ✅ Memory API returns 200 OK responses
+- ✅ 106 memories display correctly (35 summaries, 36 preferences, 35 facts)
+- ✅ Namespace badges color-coded correctly (blue/green/purple)
+- ✅ Timestamps formatted as relative time
+- ✅ Agent filter dropdown works
+- ✅ User ID filter works with 500ms debouncing
+- ✅ Sort toggle works (ascending/descending by timestamp)
+- ✅ Active filters display with remove buttons
+- ✅ Clear All button removes all filters
+- ✅ Responsive design works (1-3 column grid)
+- ✅ Loading skeletons display during fetch
+- ✅ Error state with retry button works
+- ✅ Empty state displays when no memories
+
+### Phase 5 Testing
+- ✅ Statistics dashboard displays total, by-type, and by-agent counts
+- ✅ Collapsible sections work with localStorage persistence
+- ✅ Section expand/collapse state persists across page refreshes
+- ✅ Collapsed memory cards show 150-character preview
+- ✅ "Show More" button expands full content
+- ✅ Memory type icons display correctly (📝⭐💡)
+- ✅ Sticky filters remain visible on scroll (desktop)
+- ✅ Filter count badge shows active filter count
+- ✅ Expand All / Collapse All controls work globally
+- ✅ Backend filtering uses partial matching for userId
+- ✅ Frontend userId input doesn't trigger password manager
+- ✅ All filtering combinations work correctly
+
+## Reference
+See session summaries for complete implementation details:
+- `.kiro/dev-history/enhanced-agent-ui/session-summary-2026-03-02-memory-visualization-implementation.md` (Phase 4)
+- `.kiro/dev-history/enhanced-agent-ui/session-summary-2026-03-03-memory-filtering-implementation.md` (Phase 5)
+
+## Impact
+
+### Phase 4 Impact
+Users can now:
+- View all agent memories in a responsive, accessible interface
+- Filter memories by agent name
+- Filter memories by user ID
+- Sort memories by timestamp (newest/oldest first)
+- See memory distribution across strategies (summaries, preferences, facts)
+- Understand what information agents retain across sessions
+- Debug agent memory behavior
+- Monitor memory usage patterns
+
+### Phase 5 Impact
+Users can now:
+- View memory statistics at a glance (total count, breakdown by type and agent)
+- Collapse/expand memory strategy sections to focus on relevant memories
+- Persist section state across page refreshes for consistent experience
+- Preview memory content without expanding full cards
+- Identify memory types quickly with visual icons
+- Use sticky filters that remain visible while scrolling
+- See active filter count at a glance
+- Expand/collapse all sections with one click
+- Filter by partial userId match (case-insensitive)
+- Use userId filter without password manager interference
+
+## Key Learnings
+
+### Phase 4 Learnings
+
+1. **AWS API Parameter Validation is Strict**
+   - Empty objects {} are rejected if required fields are missing
+   - Empty strings "" are rejected if minimum length requirements exist
+   - Documentation is the only reliable source of truth
+
+2. **MCP Documentation Access is Critical**
+   - The cost of not having documentation: 1+ hour of debugging time
+   - The benefit of having documentation: Correct implementation on first try
+   - Key insight: Time to look up documentation is always less than time to debug
+
+3. **Always Validate API Response Schemas**
+   - Never assume API response structures without validation
+   - Create diagnostic scripts to test APIs directly
+   - Use diagnostic output to inform implementation
+
+4. **IAM Permissions Must Match Lambda Implementation**
+   - ListMemoryRecords and RetrieveMemoryRecords are different operations
+   - Always verify IAM permissions match actual AWS SDK calls
+   - Check CloudWatch logs for AccessDenied errors
+
+### Phase 5 Learnings
+
+1. **React State Synchronization Pitfalls**
+   - Bidirectional state sync between local state and props can cause infinite loops
+   - Always include conditional checks in sync effects
+   - Consider fully controlled components when possible
+
+2. **localStorage for UI State Persistence**
+   - Persists UI state across page refreshes
+   - Use unique keys per section/component
+   - Graceful fallback to defaults when localStorage unavailable
+
+3. **Backend Filtering Patterns**
+   - Partial matching provides better UX than exact matching
+   - Case-insensitive search improves usability
+   - Enhanced logging critical for debugging filter issues
+
+4. **Password Manager Interference**
+   - Input type="text" triggers password managers on fields with "user" in name
+   - Use type="search" or type="tel" to prevent interference
+   - Add autoComplete="off" as additional safeguard
+
+## Technical Debt
+
+### Immediate (Must Fix)
+None - All critical issues resolved
+
+### Short-term (Should Fix)
+1. Replace User ID filter with Session ID filter - Better UX (User IDs are opaque Cognito UUIDs)
+2. Add "Show My ID" button - Help users understand their User ID
+3. Update MEMORY_API_SCHEMAS.md - Document actual response structure
+4. Add unit tests for transform_memory_records() - Prevent future regressions
+5. Add unit tests for Memory Lambda - Test IAM permissions, filtering, sorting
+6. Add unit tests for frontend components - Test state management, filtering, collapsing
+
+### Long-term (Nice to Have)
+1. Memory record details modal - View full memory content and metadata
+2. Session grouping - Group memories by session ID
+3. Memory timeline view - Chronological visualization
+4. Memory export functionality - Download memories as JSON/CSV
+5. Memory search - Full-text search across memory content
+6. Memory analytics - Charts and graphs for memory usage over time
+7. Memory deletion - Admin feature to delete memories
+8. Pagination - Handle large numbers of memory records efficiently
+
+## Deployment Notes
+
+### Phase 4 Deployment
+```bash
+cd infra-cdk
+npm run build
+npx cdk deploy --all
+cd ..
+python scripts/deploy-frontend.py
+```
+
+### Phase 5 Deployment
+```bash
+# Backend filtering fix
+cd infra-cdk
+npm run build
+npx cdk deploy --all
+
+# Frontend enhancements
+cd ..
+python scripts/deploy-frontend.py
+```
+
+## Statistics
+
+### Phase 4 Statistics
+- **Sessions:** 4 (frontend, API fix, field mapping, IAM permissions)
+- **Files Created:** 13 (6 components, 1 service, 4 scripts, 2 docs)
+- **Files Modified:** 5 (routing, navigation, backend stack, main stack, deploy script)
+- **Lines of Code:** ~1,500 (estimated)
+- **Bugs Fixed:** 3 (searchCriteria, field mapping, IAM permissions)
+- **Memories Displayed:** 106 (35 summaries, 36 preferences, 35 facts)
+
+### Phase 5 Statistics
+- **Sessions:** 4 (stats dashboard, collapsible sections, visual enhancements, filtering fixes)
+- **Files Created:** 3 (MemoryStats, MemorySection, MemoryExpandContext)
+- **Files Modified:** 6 (MemoryCard, MemoryFilters, MemoryList, MemoryPageHeader, MemoryPage, memory Lambda)
+- **Lines of Code:** ~800 (estimated)
+- **Features Added:** 7 (stats, sections, previews, icons, sticky filters, expand/collapse, partial matching)
+- **UX Improvements:** 5 (localStorage persistence, password manager fix, visual indicators, layout optimization, filter count badge)
+
+### Combined Statistics
+- **Total Sessions:** 8
+- **Total Files Created:** 16
+- **Total Files Modified:** 11
+- **Total Lines of Code:** ~2,300 (estimated)
+- **Total Features:** Memory visualization + 7 enhancements
+- **Total Bugs Fixed:** 5 (searchCriteria, field mapping, IAM, state sync, password manager)

@@ -359,6 +359,7 @@ def generate_aws_exports(
         "AmplifyUrl",
         "RuntimeArn",
         "FeedbackApiUrl",
+        "MemoryApiUrl",
     ]
     missing = [k for k in required if k not in outputs]
 
@@ -376,6 +377,7 @@ def generate_aws_exports(
         "agentRuntimeArn": outputs["RuntimeArn"],
         "awsRegion": region,
         "feedbackApiUrl": outputs["FeedbackApiUrl"],
+        "memoryApiUrl": outputs["MemoryApiUrl"],
         "agentPattern": pattern,
     }
 

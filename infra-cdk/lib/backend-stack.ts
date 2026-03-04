@@ -34,6 +34,7 @@ export class BackendStack extends cdk.NestedStack {
   public readonly userPoolClientId: string
   public readonly userPoolDomain: cognito.UserPoolDomain
   public feedbackApiUrl: string
+  public memoryApiUrl: string
   public runtimeArn: string
   public memoryArn: string
   private agentName: cdk.CfnParameter
@@ -42,6 +43,7 @@ export class BackendStack extends cdk.NestedStack {
   private machineClient: cognito.UserPoolClient
   private agentRuntime: agentcore.Runtime
   private api: apigateway.RestApi
+  private sharedResources?: SharedAgentResources
 
   constructor(scope: Construct, id: string, props: BackendStackProps) {
     super(scope, id, props)
@@ -98,6 +100,9 @@ export class BackendStack extends cdk.NestedStack {
 
     // Create Agent Discovery API endpoint on the existing API Gateway
     this.createAgentDiscoveryApi(props.config, props.frontendUrl)
+
+    // Create Memory API endpoint on the existing API Gateway
+    this.createMemoryApi(props.config, props.frontendUrl)
   }
 
   /**
@@ -719,6 +724,119 @@ export class BackendStack extends cdk.NestedStack {
     })
   }
 
+  /**
+   * Creates Memory API endpoint for retrieving agent memory records.
+   * 
+   * This API allows the frontend to query AgentCore Memory for conversation
+   * history, summaries, preferences, and facts.
+   * 
+   * @param config - Application configuration containing stack name
+   * @param frontendUrl - Frontend URL for CORS configuration
+   * 
+   * Implementation: infra-cdk/lambdas/memory/index.py
+   */
+  private createMemoryApi(
+    config: AppConfig,
+    frontendUrl: string
+  ): void {
+    // Ensure shared resources are available
+    if (!this.sharedResources) {
+      throw new Error("Shared resources not initialized. Memory API requires Memory ID.")
+    }
+
+    // Create Lambda function for memory API using Python
+    const memoryLambda = new PythonFunction(this, "MemoryLambda", {
+      functionName: `${config.stack_name_base}-memory`,
+      runtime: lambda.Runtime.PYTHON_3_13,
+      entry: path.join(__dirname, "..", "lambdas", "memory"),
+      handler: "handler",
+      environment: {
+        MEMORY_ID: this.sharedResources.memoryId,
+        STACK_NAME_BASE: config.stack_name_base,
+        CORS_ALLOWED_ORIGINS: `${frontendUrl},http://localhost:3000`,
+      },
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 512,
+      layers: [
+        lambda.LayerVersion.fromLayerVersionArn(
+          this,
+          "MemoryPowertoolsLayer",
+          `arn:aws:lambda:${
+            cdk.Stack.of(this).region
+          }:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313-arm64:18`
+        ),
+      ],
+      logGroup: new logs.LogGroup(this, "MemoryLambdaLogGroup", {
+        logGroupName: `/aws/lambda/${config.stack_name_base}-memory`,
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    })
+
+    // Grant Lambda permissions to access AgentCore Memory
+    memoryLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "bedrock-agentcore:GetEvent",
+          "bedrock-agentcore:ListEvents",
+          "bedrock-agentcore:ListMemoryRecords",
+          "bedrock-agentcore:RetrieveMemoryRecords",
+        ],
+        resources: [this.sharedResources.memoryArn],
+      })
+    )
+
+    // Grant Lambda permissions to read SSM parameters (if needed for agent metadata)
+    memoryLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+        ],
+        resources: [
+          `arn:aws:ssm:${cdk.Stack.of(this).region}:${
+            cdk.Stack.of(this).account
+          }:parameter/${config.stack_name_base}/*`,
+        ],
+      })
+    )
+
+    // Create Cognito authorizer (reuse pattern from agent discovery)
+    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(
+      this,
+      "MemoryApiAuthorizer",
+      {
+        cognitoUserPools: [this.userPool],
+        identitySource: "method.request.header.Authorization",
+        authorizerName: `${config.stack_name_base}-memory-authorizer`,
+      }
+    )
+
+    // Add /memory resource and GET method to existing API
+    const memoryResource = this.api.root.addResource("memory")
+    memoryResource.addMethod(
+      "GET",
+      new apigateway.LambdaIntegration(memoryLambda),
+      {
+        authorizer,
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+      }
+    )
+
+    // Store memory API URL in SSM for frontend
+    new ssm.StringParameter(this, "MemoryApiUrlParam", {
+      parameterName: `/${config.stack_name_base}/memory-api-url`,
+      stringValue: `${this.api.url}memory`,
+      description: "Memory API endpoint URL",
+    })
+
+    // Store the Memory API URL for access from main stack
+    this.memoryApiUrl = `${this.api.url}memory`
+  }
+
   private createAgentCoreGateway(config: AppConfig): void {
     // Create sample tool Lambda
     const toolLambda = new lambda.Function(this, "SampleToolLambda", {
@@ -1102,6 +1220,9 @@ export class BackendStack extends cdk.NestedStack {
 
     // Create shared resources ONCE (outside agent loop)
     const sharedResources = this.createSharedAgentResources(config)
+    
+    // Store shared resources for use in API methods
+    this.sharedResources = sharedResources
 
     // Store runtime ARNs for cross-agent invocation
     const runtimeArns: { [agentName: string]: string } = {}
@@ -1521,19 +1642,23 @@ export class BackendStack extends cdk.NestedStack {
         })
       }
 
-      // System prompt (extracted from agent source)
-      new ssm.StringParameter(this, `SSMAgentSystemPrompt-${agentName}`, {
-        parameterName: `${baseParam}/system-prompt`,
-        stringValue: metadata.systemPrompt,
-        description: `System prompt for ${agentName}`,
-      })
+      // System prompt (extracted from agent source) - only create if non-empty
+      if (metadata.systemPrompt) {
+        new ssm.StringParameter(this, `SSMAgentSystemPrompt-${agentName}`, {
+          parameterName: `${baseParam}/system-prompt`,
+          stringValue: metadata.systemPrompt,
+          description: `System prompt for ${agentName}`,
+        })
+      }
 
-      // Long description (generated from docstring)
-      new ssm.StringParameter(this, `SSMAgentLongDescription-${agentName}`, {
-        parameterName: `${baseParam}/long-description`,
-        stringValue: metadata.longDescription,
-        description: `Long description for ${agentName}`,
-      })
+      // Long description (generated from docstring) - only create if non-empty
+      if (metadata.longDescription) {
+        new ssm.StringParameter(this, `SSMAgentLongDescription-${agentName}`, {
+          parameterName: `${baseParam}/long-description`,
+          stringValue: metadata.longDescription,
+          description: `Long description for ${agentName}`,
+        })
+      }
     }
 
   /**

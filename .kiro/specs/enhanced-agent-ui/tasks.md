@@ -699,14 +699,14 @@ This phase delivers real-time observability in the chat interface. We implement 
 This phase delivers the memory visualization feature end-to-end with both backend and frontend.
 
 - [ ] 13. Memory API Lambda - Validation and Implementation
-  - [ ] 13.1 Research AgentCore Memory API documentation
+  - [x] 13.1 Research AgentCore Memory API documentation
     - Read AWS Bedrock AgentCore Memory API documentation
     - Review `docs/MEMORY_INTEGRATION.md` in repository
     - Review memory configuration in `backend-stack.ts` (lines 310-330)
     - Document memory strategies: SummaryMemoryStrategy, UserPreferenceMemoryStrategy, SemanticMemoryStrategy
     - _Requirements: 11.1, 11.2_
   
-  - [ ] 13.2 Validate memory strategy response schemas
+  - [x] 13.2 Validate memory strategy response schemas
     - Deploy test Lambda to call Memory API
     - Test ListEvents API with real Memory service
     - Test RetrieveMemoryRecords API with real Memory service
@@ -715,7 +715,7 @@ This phase delivers the memory visualization feature end-to-end with both backen
     - **CRITICAL:** Do NOT guess schemas - validate with real responses
     - _Requirements: 11.5, 11.6, 11.7, 11.8, 11.9, 11.10_
   
-  - [ ] 13.3 Implement Memory API Lambda handler
+  - [x] 13.3 Implement Memory API Lambda handler
     - Create `infra-cdk/lambdas/memory/index.py`
     - Implement JWT token validation using Cognito
     - Extract user ID from JWT token for scoping
@@ -762,7 +762,7 @@ This phase delivers the memory visualization feature end-to-end with both backen
     - Use Hypothesis with minimum 100 iterations
 
 - [ ] 14. CDK Infrastructure for Memory API
-  - [ ] 14.1 Add Memory API Lambda to CDK stack
+  - [x] 14.1 Add Memory API Lambda to CDK stack
     - Define Lambda function in `backend-stack.ts`
     - Set memory: 512MB, timeout: 30 seconds
     - Add environment variables: STACK_NAME_BASE, CORS_ALLOWED_ORIGINS, MEMORY_ID
@@ -771,13 +771,13 @@ This phase delivers the memory visualization feature end-to-end with both backen
     - Create CloudWatch log group with 7-day retention
     - _Requirements: 11.1, 11.2_
   
-  - [ ] 14.2 Add API Gateway resource for memory
+  - [x] 14.2 Add API Gateway resource for memory
     - Add `/memory` resource to API Gateway
     - Add GET method with Cognito authorizer
     - Configure CORS
     - _Requirements: 11.1_
   
-  - [ ] 14.3 Deploy and test Memory API
+  - [x] 14.3 Deploy and test Memory API
     - Run `cdk deploy` to deploy backend changes
     - Call `/api/memory` endpoint with valid JWT
     - Verify response contains memory entries
@@ -789,8 +789,8 @@ This phase delivers the memory visualization feature end-to-end with both backen
     - **CRITICAL:** Validate actual response format matches documented schema
     - _Requirements: 11.1, 11.2, 11.3, 11.4_
 
-- [ ] 15. Memory Page (Frontend)
-  - [ ] 15.1 Create Memory service layer
+- [x] 15. Memory Page (Frontend)
+  - [x] 15.1 Create Memory service layer
     - Create `frontend/src/services/memoryService.ts`
     - Define Memory interface
     - Define MemoryResponse interface
@@ -799,7 +799,7 @@ This phase delivers the memory visualization feature end-to-end with both backen
     - Add error handling
     - _Requirements: 5.1, 5.2, 11.1_
   
-  - [ ] 15.2 Create Memory page component structure
+  - [x] 15.2 Create Memory page component structure
     - Create `frontend/src/pages/MemoryPage.tsx`
     - Create MemoryPageHeader component
     - Create MemoryFilters component
@@ -811,7 +811,7 @@ This phase delivers the memory visualization feature end-to-end with both backen
     - Add empty state for no memories
     - _Requirements: 5.1, 5.2, 5.3_
   
-  - [ ] 15.3 Implement memory filters
+  - [x] 15.3 Implement memory filters
     - Add agent name filter dropdown (populated from useAgents)
     - Add user ID filter text input with debounce
     - Add sort order toggle (timestamp asc/desc)
@@ -820,7 +820,7 @@ This phase delivers the memory visualization feature end-to-end with both backen
     - Add clear filters button
     - _Requirements: 5.8, 5.9, 5.10_
   
-  - [ ] 15.4 Implement MemoryCard component
+  - [x] 15.4 Implement MemoryCard component
     - Display agent name
     - Display user identifier
     - Display memory content
@@ -829,7 +829,7 @@ This phase delivers the memory visualization feature end-to-end with both backen
     - Use shadcn/ui Card component
     - _Requirements: 5.3, 5.4, 5.5, 5.6, 5.7_
   
-  - [ ] 15.5 Add route for Memory page
+  - [x] 15.5 Add route for Memory page
     - Update React Router configuration
     - Add `/memory` route
     - Add navigation link in main navigation
@@ -852,7 +852,7 @@ This phase delivers the memory visualization feature end-to-end with both backen
     - Test that all memory fields are displayed for any memory
     - Use fast-check with minimum 100 iterations
 
-- [ ] 16. Checkpoint - Memory Visualization Complete
+- [x] 16. Checkpoint - Memory Visualization Complete
   - Ensure Memory API Lambda is deployed and working
   - Ensure Memory page displays all memories
   - Ensure filtering and sorting work correctly
@@ -860,7 +860,196 @@ This phase delivers the memory visualization feature end-to-end with both backen
   - Ask the user if questions arise
 
 
-### Phase 5: Observability Dashboard (Weeks 5-6)
+### Phase 5: Memory Enhancements (Week 5)
+
+This phase adds UX improvements to the Memory Visualization feature for better usability and information density.
+
+- [ ] 32. Memory Statistics Dashboard
+  - [x] 32.1 Create MemoryStats component
+    - Create `frontend/src/components/memory/MemoryStats.tsx`
+    - Display total memory count
+    - Display count by strategy (summaries, preferences, facts)
+    - Use shadcn/ui Card components
+    - Add icons for each strategy type
+    - Display as horizontal row of stat cards
+    - _Requirements: UX enhancement_
+  
+  - [x] 32.2 Integrate stats into Memory page
+    - Add MemoryStats component above filters section
+    - Calculate stats from fetched memories
+    - Update stats when filters change
+    - Add subtle animation on stat changes
+    - _Requirements: UX enhancement_
+  
+  - [ ]* 32.3 Write unit tests for MemoryStats
+    - Test stats display correctly
+    - Test stats update with filters
+    - Test all three strategy counts
+    - _Requirements: UX enhancement_
+
+- [ ] 33. Collapsible Strategy Sections
+  - [x] 33.1 Refactor MemoryList to group by strategy
+    - Update `frontend/src/components/memory/MemoryList.tsx`
+    - Group memories by namespace type (summaries, preferences, facts)
+    - Create MemorySection component for each strategy
+    - Add expand/collapse state for each section
+    - Default all sections to expanded
+    - Persist expand/collapse state in localStorage
+    - _Requirements: UX enhancement_
+  
+  - [x] 33.2 Create MemorySection component
+    - Create `frontend/src/components/memory/MemorySection.tsx`
+    - Display section header with strategy name and count
+    - Add expand/collapse button (chevron icon)
+    - Display memory cards in grid when expanded
+    - Smooth collapse/expand animation
+    - Color-code section header by strategy type
+    - _Requirements: UX enhancement_
+  
+  - [x] 33.3 Update MemoryCard for section context
+    - Remove namespace badge (redundant in section context)
+    - Keep timestamp, content, user ID, agent name
+    - Adjust spacing for denser layout
+    - _Requirements: UX enhancement_
+  
+  - [ ]* 33.4 Write unit tests for collapsible sections
+    - Test sections group memories correctly
+    - Test expand/collapse functionality
+    - Test localStorage persistence
+    - Test section headers display correctly
+    - _Requirements: UX enhancement_
+
+- [ ] 34. Collapsed Memory Preview
+  - [x] 34.1 Add collapsed/expanded state to MemoryCard
+    - Update `frontend/src/components/memory/MemoryCard.tsx`
+    - Add collapsed state (default: true)
+    - In collapsed state: show 1-2 line preview of content
+    - Add "Show more" / "Show less" button
+    - Smooth expand/collapse animation
+    - _Requirements: UX enhancement_
+  
+  - [x] 34.2 Implement smart content preview
+    - Truncate content to ~100 characters in collapsed state
+    - Add ellipsis (...) to indicate truncation
+    - Show full content in expanded state
+    - Preserve line breaks in expanded state
+    - _Requirements: UX enhancement_
+  
+  - [x] 34.3 Add visual indicators for expandable content
+    - Add subtle gradient fade at bottom of collapsed content
+    - Add expand icon next to "Show more" button
+    - Highlight expanded cards with subtle border
+    - _Requirements: UX enhancement_
+  
+  - [ ]* 34.4 Write unit tests for collapsed preview
+    - Test collapsed state shows preview
+    - Test expanded state shows full content
+    - Test expand/collapse toggle works
+    - Test truncation logic
+    - _Requirements: UX enhancement_
+
+- [ ] 35. Memory Type Visual Indicators
+  - [x] 35.1 Add strategy type icons
+    - Add icon to MemorySection headers
+    - Summaries: BookOpen icon (Lucide React)
+    - Preferences: Heart icon (Lucide React)
+    - Facts: Lightbulb icon (Lucide React)
+    - Color-code icons to match badges
+    - _Requirements: UX enhancement_
+  
+  - [x] 35.2 Add memory metadata badges
+    - Add small badges to MemoryCard for metadata
+    - Show session ID badge (if available in namespace)
+    - Show memory strategy badge (if not in section context)
+    - Use consistent color scheme
+    - _Requirements: UX enhancement_
+  
+  - [ ]* 35.3 Write unit tests for visual indicators
+    - Test icons display correctly
+    - Test color coding matches strategy
+    - Test metadata badges display
+    - _Requirements: UX enhancement_
+
+- [ ] 36. Memory Page Layout Improvements
+  - [x] 36.1 Optimize layout for information density
+    - Reduce padding and margins for denser layout
+    - Adjust card sizes for better space utilization
+    - Ensure readability is maintained
+    - Test on mobile, tablet, and desktop
+    - _Requirements: UX enhancement_
+  
+  - [x] 36.2 Add "Expand All" / "Collapse All" controls
+    - Add buttons to MemoryPageHeader
+    - Expand/collapse all strategy sections
+    - Expand/collapse all memory cards
+    - Persist state in localStorage
+    - _Requirements: UX enhancement_
+  
+  - [x] 36.3 Improve filter visibility
+    - Make filters sticky on scroll (desktop only)
+    - Add filter count badge to show active filters
+    - Improve mobile filter layout
+    - _Requirements: UX enhancement_
+  
+  - [ ]* 36.4 Write unit tests for layout improvements
+    - Test expand/collapse all functionality
+    - Test sticky filters on scroll
+    - Test responsive layout
+    - _Requirements: UX enhancement_
+
+- [ ] 37. Memory Search Enhancement
+  - [ ] 37.1 Add content search filter
+    - Add search input to MemoryFilters component
+    - Implement client-side full-text search
+    - Debounce search input (500ms)
+    - Highlight search terms in results
+    - _Requirements: UX enhancement_
+  
+  - [ ] 37.2 Add search result count
+    - Display "X memories found" below search input
+    - Update count as user types
+    - Show "No results" message when no matches
+    - _Requirements: UX enhancement_
+  
+  - [ ]* 37.3 Write unit tests for search
+    - Test search filters memories correctly
+    - Test debouncing works
+    - Test result count updates
+    - Test highlight functionality
+    - _Requirements: UX enhancement_
+
+- [ ] 38. Deploy and Test Memory Enhancements
+  - [ ] 38.1 Build and test locally
+    - Run `npm run build` in frontend directory
+    - Test all new features locally
+    - Verify responsive design
+    - Test on multiple browsers
+    - _Requirements: UX enhancement_
+  
+  - [ ] 38.2 Deploy to staging
+    - Deploy frontend to Amplify staging
+    - Test with real memory data
+    - Verify all enhancements work
+    - Get user feedback
+    - _Requirements: UX enhancement_
+  
+  - [ ] 38.3 Deploy to production
+    - Deploy frontend to Amplify production
+    - Monitor for errors
+    - Verify performance is acceptable
+    - _Requirements: UX enhancement_
+
+- [ ] 39. Checkpoint - Memory Enhancements Complete
+  - Ensure memory statistics dashboard displays correctly
+  - Ensure collapsible sections work
+  - Ensure collapsed/expanded memory cards work
+  - Ensure visual indicators are clear
+  - Ensure layout improvements enhance usability
+  - Users can now explore memories more efficiently
+  - Ask the user if questions arise
+
+
+### Phase 6: Observability Dashboard (Weeks 6-7)
 
 This phase delivers the standalone observability dashboard with sessions and metrics.
 
@@ -1085,7 +1274,7 @@ This phase delivers the standalone observability dashboard with sessions and met
   - Ask the user if questions arise
 
 
-### Phase 6: Polish & Optimization (Week 7)
+### Phase 7: Polish & Optimization (Week 8)
 
 This phase adds final polish, accessibility, error handling, and performance optimization.
 
@@ -1370,8 +1559,9 @@ This restructured plan delivers value incrementally:
 - **Week 2:** Users can view agent details and chat with any agent
 - **Week 3:** Users see real-time observability in chat
 - **Week 4:** Users can visualize agent memories
-- **Weeks 5-6:** Users access comprehensive observability dashboard
-- **Week 7:** Final polish and optimization
+- **Week 5:** Users can explore memories more efficiently with enhanced UX
+- **Weeks 6-7:** Users access comprehensive observability dashboard
+- **Week 8:** Final polish and optimization
 
 Each week delivers working functionality that can be tested and used immediately.
 
@@ -1387,10 +1577,11 @@ Each week delivers working functionality that can be tested and used immediately
 - Phase 2: Agent Details & Chat Enhancement (Week 2)
 - Phase 3: Inline Chat Observability (Week 3)
 - Phase 4: Memory Visualization (Week 4)
-- Phase 5: Observability Dashboard (Weeks 5-6)
-- Phase 6: Polish & Optimization (Week 7)
+- Phase 5: Memory Enhancements (Week 5)
+- Phase 6: Observability Dashboard (Weeks 6-7)
+- Phase 7: Polish & Optimization (Week 8)
 
-**Total: 7 weeks**
+**Total: 8 weeks**
 
 ## Dependencies
 
