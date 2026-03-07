@@ -32,6 +32,9 @@ See `core-rules.md` for essential coding standards, conventions, and workflow pr
 
 ## Process & Documentation
 
+**Program Management** - Epic lifecycle, backlog grooming, roadmap maintenance
+→ Use `#[[file:.kiro/steering/process/program-management.md]]` when working with epics and roadmap
+
 **Session Documentation** - Guidelines for session summaries and commit messages
 → Use `#[[file:.kiro/steering/process/session-docs.md]]` when documenting work sessions
 
