@@ -979,11 +979,26 @@ sequenceDiagram
 - Extract tool call and LLM invocation details
 - Return structured trace data
 
-**CRITICAL DECISION REQUIRED:**
-- **QUESTION:** Are traces retrieved via Runtime API's GetTrace or CloudWatch Logs API?
-- **Current Understanding:** Runtime emits logs to CloudWatch in OTEL format
-- **Need to Confirm:** Which API provides the best access to trace data
-- Add validation sub-task to test both approaches and document decision
+**Observability Data Source - RESOLVED:**
+AgentCore uses OpenTelemetry (OTEL) as the standard observability framework:
+1. **AgentCore Runtime emits OTEL traces automatically** to CloudWatch Logs
+2. **Trace retrieval approach:** Use Runtime API's `GetTrace` method
+   - Returns traces in standard OTEL format
+   - Traces contain spans with parent-child relationships
+   - Spans include standard OTEL attributes
+3. **OTEL Format Structure:**
+   - Traces → Spans → Attributes
+   - Span types: `agent_invocation`, `llm_invocation`, `tool_call`
+   - Standard OTEL attributes for LLM spans (model, tokens, etc.)
+   - Parent-child relationships via `parentSpanId`
+4. **CloudWatch Transaction Search:**
+   - AWS provides GenAI Observability dashboard
+   - Consumes OTEL data from CloudWatch
+   - Can be used for additional visualization
+**Implementation Approach:**
+- Primary: Use Runtime API `GetTrace` for programmatic access
+- Backend Lambda parses OTEL format into simplified JSON for frontend
+- Validate actual OTEL structure from real Runtime responses (don't guess)
 
 **IAM Permissions Required (Option A - Runtime API):**
 - `bedrock-agentcore:GetTrace`
@@ -1108,6 +1123,21 @@ sequenceDiagram
   ]
 }
 ```
+
+### Observability Traces API Lambda
+
+**OTEL Integration:**
+- AgentCore Runtime returns traces in OpenTelemetry (OTEL) standard format
+- Lambda must parse OTEL structure: traces → spans → attributes
+- Span relationships defined by `parentSpanId` field
+- Standard OTEL semantic conventions for GenAI spans
+- Must validate actual OTEL structure from real Runtime responses
+
+**Key OTEL Concepts:**
+- **Traces:** Top-level container for a complete operation
+- **Spans:** Individual operations within a trace (tool calls, LLM invocations)
+- **Attributes:** Metadata attached to spans (model name, tokens, tool parameters)
+- **Parent-Child Relationships:** Spans reference parent via `parentSpanId`
 
 ### Service Layer (Frontend)
 
@@ -1885,10 +1915,31 @@ AgentCore Runtime returns traces in OpenTelemetry (OTEL) format:
 
 **VALIDATION REQUIRED:**
 
-**Critical Question:** Are observability logs retrieved via:
-- Option A: AgentCore Observability API (structured trace queries)
-- Option B: CloudWatch Logs API (OTEL format logs)
-- Option C: Runtime API's GetTrace method
+**Observability Data Source - RESOLVED:**
+
+AgentCore uses OpenTelemetry (OTEL) as the standard observability framework:
+
+1. **AgentCore Runtime emits OTEL traces automatically** to CloudWatch Logs
+2. **Trace retrieval approach:** Use Runtime API's `GetTrace` method
+   - Returns traces in standard OTEL format
+   - Traces contain spans with parent-child relationships
+   - Spans include standard OTEL attributes
+
+3. **OTEL Format Structure:**
+   - Traces → Spans → Attributes
+   - Span types: `agent_invocation`, `llm_invocation`, `tool_call`
+   - Standard OTEL attributes for LLM spans (model, tokens, etc.)
+   - Parent-child relationships via `parentSpanId`
+
+4. **CloudWatch Transaction Search:**
+   - AWS provides GenAI Observability dashboard
+   - Consumes OTEL data from CloudWatch
+   - Can be used for additional visualization
+
+**Implementation Approach:**
+- Primary: Use Runtime API `GetTrace` for programmatic access
+- Backend Lambda parses OTEL format into simplified JSON for frontend
+- Validate actual OTEL structure from real Runtime responses (don't guess)
 
 **Current Understanding:**
 - Runtime emits logs to CloudWatch in OTEL format

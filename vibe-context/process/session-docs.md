@@ -3,18 +3,54 @@ inclusion: manual
 ---
 
 # Session Documentation Guidelines
-
-**IF YOU ARE AN AI ASSISTANT YOU MUST FOLLOW THESE RULES**
-
 ## Overview
 
-Proper documentation maintains project continuity, enables knowledge transfer, and provides an audit trail. This covers two types:
+Proper documentation maintains project continuity, enables knowledge transfer, and provides an audit trail. This covers three related types:
 
-1. **Session Summaries** - Comprehensive logs of substantial work sessions
-2. **Commit Messages** - Detailed commit descriptions for version control
+1. **Status** - Capture work in process and context to continue or progress to most immediate next steps
+2. **Session Summaries** - Comprehensive logs of substantial work sessions
+3. **Commit Messages** - Detailed commit descriptions for version control
 
 ---
+## Status
 
+### When to Create
+
+Create status.md when moving from one Kiro session to the next in order to seed the next session (context window). The user should be able to simply instruct Kiro with "review status.md and proceed", or even just #status.md
+
+### File Location and Naming
+**Location:** `status.md` (top of project) for easy reference
+
+**Naming:** `status.md` (overwrite prior version)
+
+**Examples:**
+- `status.md`
+- `status.md` (overwrites)
+
+### Content Structure
+
+```markdown
+# Status: [Brief Statement on What's Happening / What's Next]
+
+**Date:** [Month Day, Year]
+**Duration:** [Approximate time]
+**Goal:** [Primary objective]
+
+## Previous Session Recap (condensed)
+
+- ✅ What was completed
+- 🔧 What was in progress
+- ❌ What was blocked
+
+## Most Relevant Context to Continue Work
+
+## Clear References to Supporting Docs
+
+e.g. .kiro/steering/, .kiro/specs/, .kiro/dev-history/, or others
+
+```
+
+---
 ## Session Summaries
 
 ### When to Create

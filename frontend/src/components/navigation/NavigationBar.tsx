@@ -12,7 +12,7 @@
 
 import { Link, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { MessageSquare, Users, Brain } from 'lucide-react'
+import { MessageSquare, Users, Brain, BarChart3 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import {
   AlertDialog,
@@ -46,6 +46,11 @@ export function NavigationBar() {
       to: '/memory',
       label: 'Memory',
       icon: Brain,
+    },
+    {
+      to: '/observability',
+      label: 'Observability',
+      icon: BarChart3,
     },
   ]
 

@@ -7,6 +7,7 @@ import AgentGalleryPage from './AgentGalleryPage'
 import AgentDetailsPage from './AgentDetailsPage'
 import AboutPage from './AboutPage'
 import MemoryPage from './MemoryPage'
+import ObservabilityDashboard from './ObservabilityDashboard'
 
 export default function AppRoutes() {
   return (
@@ -17,6 +18,7 @@ export default function AppRoutes() {
       <Route path="/agents" element={<AgentGalleryPage />} />
       <Route path="/agents/:agentName" element={<AgentDetailsPage />} />
       <Route path="/memory" element={<MemoryPage />} />
+      <Route path="/observability" element={<ObservabilityDashboard />} />
     </Routes>
   )
 }

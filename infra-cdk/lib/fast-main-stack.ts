@@ -89,6 +89,24 @@ export class FastMainStack extends cdk.Stack {
       exportName: `${props.config.stack_name_base}-MemoryApiUrl`,
     })
 
+    new cdk.CfnOutput(this, "ObservabilitySessionsApiUrl", {
+      value: this.backendStack.observabilitySessionsApiUrl,
+      description: "Observability Sessions API Gateway URL",
+      exportName: `${props.config.stack_name_base}-ObservabilitySessionsApiUrl`,
+    })
+
+    new cdk.CfnOutput(this, "ObservabilityMetricsApiUrl", {
+      value: this.backendStack.observabilityMetricsApiUrl,
+      description: "Observability Metrics API Gateway URL",
+      exportName: `${props.config.stack_name_base}-ObservabilityMetricsApiUrl`,
+    })
+
+    new cdk.CfnOutput(this, "ObservabilityTracesApiUrl", {
+      value: this.backendStack.observabilityTracesApiUrl,
+      description: "Observability Traces API Gateway URL",
+      exportName: `${props.config.stack_name_base}-ObservabilityTracesApiUrl`,
+    })
+
     new cdk.CfnOutput(this, "AmplifyConsoleUrl", {
       value: `https://console.aws.amazon.com/amplify/apps/${this.amplifyHostingStack.amplifyApp.appId}`,
       description: "Amplify Console URL for monitoring deployments",

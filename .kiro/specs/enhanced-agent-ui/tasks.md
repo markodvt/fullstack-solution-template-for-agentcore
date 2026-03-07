@@ -556,8 +556,10 @@ This phase delivers real-time observability in the chat interface. We implement 
     - Review CloudWatch Logs API documentation
     - Test Runtime API GetTrace with real service
     - Test CloudWatch Logs FilterLogEvents for OTEL traces
-    - **DECISION REQUIRED:** Choose Runtime API vs CloudWatch Logs
-    - Document chosen approach and rationale
+    - **DECISION:** Use Runtime API's GetTrace method (returns OTEL format)
+    - **RATIONALE:** AgentCore Runtime natively emits OTEL traces; GetTrace provides structured access
+    - Document OTEL format structure from actual responses
+
     - _Requirements: 7.1, 12.4_
   
   - [ ] 9.2 Validate OTEL trace format structure
@@ -571,7 +573,7 @@ This phase delivers real-time observability in the chat interface. We implement 
     - **CRITICAL:** Do NOT guess OTEL format - validate with real traces
     - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 12.8_
   
-  - [ ] 9.3 Implement Observability Traces API Lambda handler
+  - [x] 9.3 Implement Observability Traces API Lambda handler
     - Create `infra-cdk/lambdas/observability-traces/index.py`
     - Implement JWT token validation using Cognito
     - Extract user ID from JWT token for scoping
@@ -604,7 +606,7 @@ This phase delivers real-time observability in the chat interface. We implement 
     - Use Hypothesis with minimum 100 iterations
 
 - [ ] 10. CDK Infrastructure for Traces API
-  - [ ] 10.1 Add Traces Lambda to CDK stack
+  - [x] 10.1 Add Traces Lambda to CDK stack
     - Define Lambda function in `backend-stack.ts`
     - Set memory: 512MB, timeout: 30 seconds
     - Add environment variables: STACK_NAME_BASE, CORS_ALLOWED_ORIGINS
@@ -613,7 +615,7 @@ This phase delivers real-time observability in the chat interface. We implement 
     - Create CloudWatch log group with 7-day retention
     - _Requirements: 7.1, 12.4_
   
-  - [ ] 10.2 Add API Gateway resource for traces
+  - [x] 10.2 Add API Gateway resource for traces
     - Add `/observability/traces/{sessionId}` resource to API Gateway
     - Add GET method with Cognito authorizer
     - Configure CORS
@@ -1053,8 +1055,8 @@ This phase adds UX improvements to the Memory Visualization feature for better u
 
 This phase delivers the standalone observability dashboard with sessions and metrics.
 
-- [ ] 17. Observability Sessions API Lambda - Validation and Implementation
-  - [ ] 17.1 Research AgentCore Runtime API documentation
+- [x] 17. Observability Sessions API Lambda - Validation and Implementation
+  - [x] 17.1 Research AgentCore Runtime API documentation
     - Read AWS Bedrock AgentCore Runtime API documentation
     - Review Runtime configuration in `backend-stack.ts`
     - Document ListSessions API parameters and response format
@@ -1062,7 +1064,7 @@ This phase delivers the standalone observability dashboard with sessions and met
     - Confirm session metadata fields available
     - _Requirements: 6.1, 6.2, 12.1, 12.2_
   
-  - [ ] 17.2 Validate session response schemas
+  - [x] 17.2 Validate session response schemas
     - Deploy test Lambda to call Runtime API
     - Test ListSessions API with real Runtime service
     - Test GetSession API with real Runtime service
@@ -1071,7 +1073,7 @@ This phase delivers the standalone observability dashboard with sessions and met
     - **CRITICAL:** Do NOT guess schemas - validate with real responses
     - _Requirements: 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9, 12.7_
   
-  - [ ] 17.3 Implement Observability Sessions API Lambda handler
+  - [x] 17.3 Implement Observability Sessions API Lambda handler
     - Create `infra-cdk/lambdas/observability-sessions/index.py`
     - Implement JWT token validation using Cognito
     - Extract user ID from JWT token for scoping
@@ -1140,7 +1142,7 @@ This phase delivers the standalone observability dashboard with sessions and met
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8_
 
 - [ ] 19. CDK Infrastructure for Observability APIs
-  - [ ] 19.1 Add Sessions and Metrics Lambdas to CDK stack
+  - [x] 19.1 Add Sessions and Metrics Lambdas to CDK stack
     - Define Sessions Lambda function in `backend-stack.ts`
     - Define Metrics Lambda function in `backend-stack.ts`
     - Set memory: 512MB, timeout: 30 seconds for each
@@ -1150,7 +1152,7 @@ This phase delivers the standalone observability dashboard with sessions and met
     - Create CloudWatch log groups with 7-day retention
     - _Requirements: 6.1, 6.2, 8.1, 12.1, 12.2_
   
-  - [ ] 19.2 Add API Gateway resources for observability
+  - [x] 19.2 Add API Gateway resources for observability
     - Add `/observability/sessions` resource
     - Add GET method to `/observability/sessions` with Cognito authorizer
     - Add `/observability/metrics` resource
@@ -1158,7 +1160,7 @@ This phase delivers the standalone observability dashboard with sessions and met
     - Configure CORS for all endpoints
     - _Requirements: 12.1, 12.2_
   
-  - [ ] 19.3 Deploy and test Observability APIs
+  - [x] 19.3 Deploy and test Observability APIs
     - Run `cdk deploy` to deploy backend changes
     - Call `/api/observability/sessions` endpoint with valid JWT
     - Verify response contains session entries
@@ -1170,7 +1172,7 @@ This phase delivers the standalone observability dashboard with sessions and met
     - _Requirements: 6.1, 6.2, 8.1, 12.1, 12.2_
 
 - [ ] 20. Observability Dashboard Page (Frontend)
-  - [ ] 20.1 Create Observability Dashboard page structure
+  - [x] 20.1 Create Observability Dashboard page structure
     - Create `frontend/src/pages/ObservabilityDashboard.tsx`
     - Create ObservabilityTabs component (Metrics, Sessions)
     - Create MetricsTab component
@@ -1180,7 +1182,7 @@ This phase delivers the standalone observability dashboard with sessions and met
     - Add error states
     - _Requirements: 6.1, 6.2, 8.1_
   
-  - [ ] 20.2 Implement Sessions Tab
+  - [x] 20.2 Implement Sessions Tab
     - Create SessionFilters component (agent, time range)
     - Create SessionList component
     - Create SessionCard component
@@ -1197,7 +1199,7 @@ This phase delivers the standalone observability dashboard with sessions and met
     - Display full trace timeline and span details
     - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 7.10_
   
-  - [ ] 20.4 Implement Metrics Tab
+  - [x] 20.4 Implement Metrics Tab
     - Install recharts dependency
     - Create MetricsSummary component
     - Display total sessions count
@@ -1207,34 +1209,34 @@ This phase delivers the standalone observability dashboard with sessions and met
     - Use shadcn/ui Card components
     - _Requirements: 8.2, 8.3, 8.4, 8.5, 8.6, 8.7_
   
-  - [ ] 20.5 Create per-agent metrics breakdown
+  - [x] 20.5 Create per-agent metrics breakdown
     - Create AgentMetricsTable component
     - Display table with columns: agent name, session count, token usage, avg duration, success rate
     - Add sorting by each column
     - Use shadcn/ui Table component
     - _Requirements: 8.3, 8.4, 8.6, 8.7_
   
-  - [ ] 20.6 Create top tools chart
+  - [x] 20.6 Create top tools chart
     - Create TopToolsChart component
     - Display bar chart of most frequently used tools
     - Use recharts BarChart component
     - _Requirements: 8.8_
   
-  - [ ] 20.7 Implement time range selector
+  - [x] 20.7 Implement time range selector
     - Create TimeRangeSelector component
     - Add buttons for 1h, 24h, 7d, 30d
     - Refetch metrics when time range changes
     - Display selected time range
     - _Requirements: 8.9_
   
-  - [ ] 20.8 Implement auto-refresh for metrics
+  - [x] 20.8 Implement auto-refresh for metrics
     - Add auto-refresh every 30 seconds
     - Display last updated timestamp
     - Add manual refresh button
     - Pause auto-refresh when user is interacting
     - _Requirements: 8.10_
   
-  - [ ] 20.9 Add route for Observability Dashboard
+  - [x] 20.9 Add route for Observability Dashboard
     - Update React Router configuration
     - Add `/observability` route
     - Add navigation link in main navigation

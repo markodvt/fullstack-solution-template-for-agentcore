@@ -360,6 +360,9 @@ def generate_aws_exports(
         "RuntimeArn",
         "FeedbackApiUrl",
         "MemoryApiUrl",
+        "ObservabilitySessionsApiUrl",
+        "ObservabilityMetricsApiUrl",
+        "ObservabilityTracesApiUrl",
     ]
     missing = [k for k in required if k not in outputs]
 
@@ -378,6 +381,9 @@ def generate_aws_exports(
         "awsRegion": region,
         "feedbackApiUrl": outputs["FeedbackApiUrl"],
         "memoryApiUrl": outputs["MemoryApiUrl"],
+        "observabilitySessionsApiUrl": outputs["ObservabilitySessionsApiUrl"],
+        "observabilityMetricsApiUrl": outputs["ObservabilityMetricsApiUrl"],
+        "observabilityTracesApiUrl": outputs["ObservabilityTracesApiUrl"],
         "agentPattern": pattern,
     }
 

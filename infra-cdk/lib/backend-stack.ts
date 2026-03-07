@@ -35,6 +35,9 @@ export class BackendStack extends cdk.NestedStack {
   public readonly userPoolDomain: cognito.UserPoolDomain
   public feedbackApiUrl: string
   public memoryApiUrl: string
+  public observabilitySessionsApiUrl: string
+  public observabilityMetricsApiUrl: string
+  public observabilityTracesApiUrl: string
   public runtimeArn: string
   public memoryArn: string
   private agentName: cdk.CfnParameter
@@ -103,6 +106,15 @@ export class BackendStack extends cdk.NestedStack {
 
     // Create Memory API endpoint on the existing API Gateway
     this.createMemoryApi(props.config, props.frontendUrl)
+
+    // Create Observability Sessions API endpoint on the existing API Gateway
+    this.createObservabilitySessionsApi(props.config, props.frontendUrl)
+
+    // Create Observability Metrics API endpoint on the existing API Gateway
+    this.createObservabilityMetricsApi(props.config, props.frontendUrl)
+
+    // Create Observability Traces API endpoint on the existing API Gateway
+    this.createObservabilityTracesApi(props.config, props.frontendUrl)
   }
 
   /**
@@ -1758,6 +1770,372 @@ export class BackendStack extends cdk.NestedStack {
       value: errorMessage.substring(0, 200), // CloudFormation output limit
       exportName: `${config.stack_name_base}-AgentError-${agentName}`,
     })
+  }
+
+  /**
+   * Creates Observability Sessions API endpoint for retrieving session data from OTEL spans.
+   * 
+   * This API queries CloudWatch Logs aws/spans log group to extract session information
+   * from OTEL traces emitted by AgentCore Runtime. Since AgentCore Runtime does not provide
+   * a direct API to list sessions, we extract session data from spans.
+   * 
+   * Endpoint: GET /observability/sessions
+   * Query Parameters:
+   *   - agentName: Filter sessions by agent name (optional)
+   *   - startTime: Start of time range in milliseconds (optional)
+   *   - endTime: End of time range in milliseconds (optional)
+   *   - limit: Maximum results per page (optional, default: 50)
+   *   - nextToken: Pagination token (optional)
+   * 
+   * Implementation: infra-cdk/lambdas/observability-sessions/index.py
+   */
+  private createObservabilitySessionsApi(
+    config: AppConfig,
+    frontendUrl: string
+  ): void {
+    // Create Lambda function for observability sessions API
+    const observabilitySessionsLambda = new PythonFunction(this, "ObservabilitySessionsLambda", {
+      functionName: `${config.stack_name_base}-observability-sessions`,
+      runtime: lambda.Runtime.PYTHON_3_13,
+      entry: path.join(__dirname, "..", "lambdas", "observability-sessions"),
+      handler: "handler",
+      environment: {
+        STACK_NAME_BASE: config.stack_name_base,
+        CORS_ALLOWED_ORIGINS: `${frontendUrl},http://localhost:3000`,
+      },
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 512,
+      layers: [
+        lambda.LayerVersion.fromLayerVersionArn(
+          this,
+          "ObservabilitySessionsPowertoolsLayer",
+          `arn:aws:lambda:${
+            cdk.Stack.of(this).region
+          }:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313-arm64:18`
+        ),
+      ],
+      logGroup: new logs.LogGroup(this, "ObservabilitySessionsLambdaLogGroup", {
+        logGroupName: `/aws/lambda/${config.stack_name_base}-observability-sessions`,
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    })
+
+    // Grant Lambda permissions to query CloudWatch Logs aws/spans log group
+    observabilitySessionsLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "logs:FilterLogEvents",
+          "logs:DescribeLogStreams",
+        ],
+        resources: [
+          `arn:aws:logs:${cdk.Stack.of(this).region}:${
+            cdk.Stack.of(this).account
+          }:log-group:aws/spans:*`,
+        ],
+      })
+    )
+
+    // Grant Lambda permissions to read SSM parameters (for agent metadata if needed)
+    observabilitySessionsLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+        ],
+        resources: [
+          `arn:aws:ssm:${cdk.Stack.of(this).region}:${
+            cdk.Stack.of(this).account
+          }:parameter/${config.stack_name_base}/*`,
+        ],
+      })
+    )
+
+    // Create Cognito authorizer
+    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(
+      this,
+      "ObservabilitySessionsApiAuthorizer",
+      {
+        cognitoUserPools: [this.userPool],
+        identitySource: "method.request.header.Authorization",
+        authorizerName: `${config.stack_name_base}-observability-sessions-authorizer`,
+      }
+    )
+
+    // Add /observability resource if it doesn't exist, then add /sessions sub-resource
+    const observabilityResource = this.api.root.resourceForPath("observability") || 
+      this.api.root.addResource("observability")
+    
+    const sessionsResource = observabilityResource.addResource("sessions")
+    
+    sessionsResource.addMethod(
+      "GET",
+      new apigateway.LambdaIntegration(observabilitySessionsLambda),
+      {
+        authorizer,
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+      }
+    )
+
+    // Store observability sessions API URL in SSM for frontend
+    new ssm.StringParameter(this, "ObservabilitySessionsApiUrlParam", {
+      parameterName: `/${config.stack_name_base}/observability-sessions-api-url`,
+      stringValue: `${this.api.url}observability/sessions`,
+      description: "Observability Sessions API endpoint URL",
+    })
+
+    // Store the Observability Sessions API URL for access from main stack
+    this.observabilitySessionsApiUrl = `${this.api.url}observability/sessions`
+  }
+
+  /**
+   * Creates Observability Metrics API endpoint for aggregating metrics from OTEL spans.
+   * 
+   * This API queries CloudWatch Logs aws/spans log group to aggregate metrics including:
+   * - Total sessions
+   * - Average session duration
+   * - Token usage
+   * - Success rate
+   * - Top tools used
+   * - Per-agent breakdowns
+   * 
+   * Endpoint: GET /observability/metrics
+   * Query Parameters:
+   *   - timeRange: Time range in hours (optional, default: 24, options: 1, 24, 168, 720)
+   * 
+   * Implementation: infra-cdk/lambdas/observability-metrics/index.py
+   */
+  private createObservabilityMetricsApi(
+    config: AppConfig,
+    frontendUrl: string
+  ): void {
+    // Create Lambda function for observability metrics API
+    const observabilityMetricsLambda = new PythonFunction(this, "ObservabilityMetricsLambda", {
+      functionName: `${config.stack_name_base}-observability-metrics`,
+      runtime: lambda.Runtime.PYTHON_3_13,
+      entry: path.join(__dirname, "..", "lambdas", "observability-metrics"),
+      handler: "handler",
+      environment: {
+        STACK_NAME_BASE: config.stack_name_base,
+        CORS_ALLOWED_ORIGINS: `${frontendUrl},http://localhost:3000`,
+      },
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 512,
+      layers: [
+        lambda.LayerVersion.fromLayerVersionArn(
+          this,
+          "ObservabilityMetricsPowertoolsLayer",
+          `arn:aws:lambda:${
+            cdk.Stack.of(this).region
+          }:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313-arm64:18`
+        ),
+      ],
+      logGroup: new logs.LogGroup(this, "ObservabilityMetricsLambdaLogGroup", {
+        logGroupName: `/aws/lambda/${config.stack_name_base}-observability-metrics`,
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    })
+
+    // Grant Lambda permissions to query CloudWatch Logs aws/spans log group
+    observabilityMetricsLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "logs:FilterLogEvents",
+          "logs:DescribeLogStreams",
+        ],
+        resources: [
+          `arn:aws:logs:${cdk.Stack.of(this).region}:${
+            cdk.Stack.of(this).account
+          }:log-group:aws/spans:*`,
+        ],
+      })
+    )
+
+    // Grant Lambda permissions to read SSM parameters (for agent metadata if needed)
+    observabilityMetricsLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+        ],
+        resources: [
+          `arn:aws:ssm:${cdk.Stack.of(this).region}:${
+            cdk.Stack.of(this).account
+          }:parameter/${config.stack_name_base}/*`,
+        ],
+      })
+    )
+
+    // Create Cognito authorizer
+    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(
+      this,
+      "ObservabilityMetricsApiAuthorizer",
+      {
+        cognitoUserPools: [this.userPool],
+        identitySource: "method.request.header.Authorization",
+        authorizerName: `${config.stack_name_base}-observability-metrics-authorizer`,
+      }
+    )
+
+    // Add /observability/metrics resource
+    const observabilityResource = this.api.root.resourceForPath("observability") || 
+      this.api.root.addResource("observability")
+    
+    const metricsResource = observabilityResource.addResource("metrics")
+    
+    metricsResource.addMethod(
+      "GET",
+      new apigateway.LambdaIntegration(observabilityMetricsLambda),
+      {
+        authorizer,
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+      }
+    )
+
+    // Store observability metrics API URL in SSM for frontend
+    new ssm.StringParameter(this, "ObservabilityMetricsApiUrlParam", {
+      parameterName: `/${config.stack_name_base}/observability-metrics-api-url`,
+      stringValue: `${this.api.url}observability/metrics`,
+      description: "Observability Metrics API endpoint URL",
+    })
+
+    // Store the Observability Metrics API URL for access from main stack
+    this.observabilityMetricsApiUrl = `${this.api.url}observability/metrics`
+  }
+
+  /**
+   * Creates Observability Traces API endpoint for retrieving trace data for a specific session.
+   * 
+   * This API queries CloudWatch Logs aws/spans log group to retrieve OTEL spans for a session
+   * and builds a hierarchical trace structure showing parent-child span relationships.
+   * 
+   * Endpoint: GET /observability/traces/{sessionId}
+   * Authentication: Cognito JWT token required
+   * 
+   * Response includes:
+   * - traceId: Unique trace identifier
+   * - sessionId: Session identifier
+   * - spans: Array of spans with parent-child relationships
+   * - startTime, endTime, duration: Overall trace timing
+   * 
+   * Each span includes:
+   * - spanId, parentSpanId: Span identifiers for building hierarchy
+   * - name: Span name
+   * - spanType: agent_invocation, llm_invocation, tool_call, or unknown
+   * - startTime, endTime, duration: Span timing
+   * - status: ok or error
+   * - attributes: Type-specific attributes (tool name, LLM model, tokens, errors)
+   * 
+   * Implementation: infra-cdk/lambdas/observability-traces/index.py
+   */
+  private createObservabilityTracesApi(
+    config: AppConfig,
+    frontendUrl: string
+  ): void {
+    // Create Lambda function for observability traces API
+    const observabilityTracesLambda = new PythonFunction(this, "ObservabilityTracesLambda", {
+      functionName: `${config.stack_name_base}-observability-traces`,
+      runtime: lambda.Runtime.PYTHON_3_13,
+      entry: path.join(__dirname, "..", "lambdas", "observability-traces"),
+      handler: "handler",
+      environment: {
+        STACK_NAME_BASE: config.stack_name_base,
+        CORS_ALLOWED_ORIGINS: `${frontendUrl},http://localhost:3000`,
+      },
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 512,
+      layers: [
+        lambda.LayerVersion.fromLayerVersionArn(
+          this,
+          "ObservabilityTracesPowertoolsLayer",
+          `arn:aws:lambda:${
+            cdk.Stack.of(this).region
+          }:017000801446:layer:AWSLambdaPowertoolsPythonV3-python313-arm64:18`
+        ),
+      ],
+      logGroup: new logs.LogGroup(this, "ObservabilityTracesLambdaLogGroup", {
+        logGroupName: `/aws/lambda/${config.stack_name_base}-observability-traces`,
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    })
+
+    // Grant Lambda permissions to query CloudWatch Logs aws/spans log group
+    observabilityTracesLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "logs:FilterLogEvents",
+          "logs:DescribeLogStreams",
+        ],
+        resources: [
+          `arn:aws:logs:${cdk.Stack.of(this).region}:${
+            cdk.Stack.of(this).account
+          }:log-group:aws/spans:*`,
+        ],
+      })
+    )
+
+    // Grant Lambda permissions to read SSM parameters (for agent metadata if needed)
+    observabilityTracesLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+        ],
+        resources: [
+          `arn:aws:ssm:${cdk.Stack.of(this).region}:${
+            cdk.Stack.of(this).account
+          }:parameter/${config.stack_name_base}/*`,
+        ],
+      })
+    )
+
+    // Create Cognito authorizer
+    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(
+      this,
+      "ObservabilityTracesApiAuthorizer",
+      {
+        cognitoUserPools: [this.userPool],
+        identitySource: "method.request.header.Authorization",
+        authorizerName: `${config.stack_name_base}-observability-traces-authorizer`,
+      }
+    )
+
+    // Add /observability/traces/{sessionId} resource
+    const observabilityResource = this.api.root.resourceForPath("observability") || 
+      this.api.root.addResource("observability")
+    
+    const tracesResource = observabilityResource.addResource("traces")
+    const sessionIdResource = tracesResource.addResource("{sessionId}")
+    
+    sessionIdResource.addMethod(
+      "GET",
+      new apigateway.LambdaIntegration(observabilityTracesLambda),
+      {
+        authorizer,
+        authorizationType: apigateway.AuthorizationType.COGNITO,
+      }
+    )
+
+    // Store observability traces API URL in SSM for frontend
+    new ssm.StringParameter(this, "ObservabilityTracesApiUrlParam", {
+      parameterName: `/${config.stack_name_base}/observability-traces-api-url`,
+      stringValue: `${this.api.url}observability/traces`,
+      description: "Observability Traces API endpoint URL",
+    })
+
+    // Store the Observability Traces API URL for access from main stack
+    this.observabilityTracesApiUrl = `${this.api.url}observability/traces`
   }
 }
 
